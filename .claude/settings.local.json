@@ -31,7 +31,16 @@
       "Bash(npm ls:*)",
       "Bash(ss:*)",
       "Bash(lsof:*)",
-      "Bash(ps:*)"
+      "Bash(ps:*)",
+      "Bash(echo:*)",
+      "Bash($SHELL --version)",
+      "Bash(claude:*)",
+      "WebSearch",
+      "Bash(source:*)",
+      "Bash(pip install:*)",
+      "Bash(python3:*)",
+      "Bash(gdown:*)",
+      "Bash(pgrep:*)"
     ]
   }
 }
