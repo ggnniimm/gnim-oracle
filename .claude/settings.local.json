@@ -28,7 +28,10 @@
       "Bash(export PATH=\"/home/codespace/.duckdb/cli/latest:$PATH\")",
       "Bash(duckdb:*)",
       "Bash(PATH=\"/home/codespace/.duckdb/cli/latest:$PATH\" duckdb:*)",
-      "Bash(npm ls:*)"
+      "Bash(npm ls:*)",
+      "Bash(ss:*)",
+      "Bash(lsof:*)",
+      "Bash(ps:*)"
     ]
   }
 }
