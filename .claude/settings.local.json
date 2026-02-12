@@ -1,13 +1,33 @@
 {
   "permissions": {
     "allow": [
-      "Bash(gh:*)", "Bash(ghq:*)", "Bash(git:*)",
-      "Bash(bun:*)", "Bash(bunx:*)", "Bash(mkdir:*)", "Bash(ln:*)",
-      "Bash(rg:*)", "Bash(date:*)", "Bash(ls:*)", "Bash(tree:*)",
-      "Bash(curl:*)", "Bash(du:*)", "Bash(wc:*)",
-      "Bash(*ψ/*)", "Bash(*psi/*)",
-      "Skill(learn)", "Skill(trace)", "Skill(awaken)",
-      "Skill(rrr)", "Skill(recap)", "Skill(project)"
+      "Bash(gh:*)",
+      "Bash(ghq:*)",
+      "Bash(git:*)",
+      "Bash(bun:*)",
+      "Bash(bunx:*)",
+      "Bash(mkdir:*)",
+      "Bash(ln:*)",
+      "Bash(rg:*)",
+      "Bash(date:*)",
+      "Bash(ls:*)",
+      "Bash(tree:*)",
+      "Bash(curl:*)",
+      "Bash(du:*)",
+      "Bash(wc:*)",
+      "Bash(*ψ/*)",
+      "Bash(*psi/*)",
+      "Skill(learn)",
+      "Skill(trace)",
+      "Skill(awaken)",
+      "Skill(rrr)",
+      "Skill(recap)",
+      "Skill(project)",
+      "Bash(~/.bun/bin/bun run:*)",
+      "Bash(sh)",
+      "Bash(export PATH=\"/home/codespace/.duckdb/cli/latest:$PATH\")",
+      "Bash(duckdb:*)",
+      "Bash(PATH=\"/home/codespace/.duckdb/cli/latest:$PATH\" duckdb:*)"
     ]
   }
 }
