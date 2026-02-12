@@ -1,6 +1,6 @@
 # RAG (Retrieval-Augmented Generation)
 
-> Source: Gemini Deep Research | 2026-02-12
+> Source: Gemini Deep Research + LightRAG codebase | 2026-02-12
 
 ## What is RAG?
 
@@ -99,3 +99,53 @@ RAG แก้ปัญหาหลักของ LLM 3 อย่าง:
 - Long Context: ~$900,000 (20-24x แพงกว่า!)
 
 **Hybrid (RAG + Fine-tuning)** → accuracy 88-92% (ดีที่สุด)
+
+---
+
+## Graph-Based RAG: LightRAG
+
+> Source: codebase exploration | `ψ/learn/HKUDS/LightRAG/`
+
+Standard RAG ใช้ text chunks เป็น retrieval unit — LightRAG เปลี่ยนกระบวนทัศน์โดยใช้ **Knowledge Graph** แทน
+
+### สิ่งที่ต่างจาก Standard RAG
+
+| ประเด็น | Standard RAG | LightRAG |
+|---------|-------------|---------|
+| Retrieval unit | Text chunks | Entities + Relationships |
+| Knowledge repr. | Vector space | Knowledge Graph |
+| Multi-hop reasoning | ทำยาก | ทำได้ผ่าน graph traversal |
+| Query flexibility | Dense + BM25 | 6 modes (local/global/hybrid/mix/naive/bypass) |
+
+### Query Modes
+
+| Mode | การทำงาน | ใช้เมื่อ |
+|------|---------|---------|
+| `local` | Entity neighbors | ต้องการ context เฉพาะจุด |
+| `global` | Graph summaries | ต้องการ big picture |
+| `hybrid` | Local + Global | balanced |
+| `mix` | KG path + vector + rerank | ต้องการ precision สูง |
+| `naive` | Vector only | fallback, fast |
+| `bypass` | LLM โดยตรง | ไม่ต้องการ retrieval |
+
+### Innovations
+
+1. **Dual-Level Retrieval** — ค้นทั้ง entity-level และ chunk-level พร้อมกัน
+2. **Incremental Graph Building** — extract entities/relations ตอน insert, merge ข้าม documents
+3. **Map-Reduce Summarization** — handle entity descriptions จำนวนมากโดยไม่ overflow context
+4. **LLM Response Caching** — MDHash-based, ลด cost
+5. **Pluggable Backends** — dev ใช้ JSON/NetworkX, prod ใช้ Neo4j/PostgreSQL/Qdrant
+
+### เมื่อไหรควรใช้ LightRAG
+
+- ต้องการ **multi-hop reasoning** ข้าม entities หลายตัว
+- documents มี **relationships ซับซ้อน** (e.g., องค์กร, ตัวละคร, เหตุการณ์)
+- ต้องการทั้ง **factual lookup** และ **conceptual understanding**
+- production ที่ต้องการ **citation + traceability**
+
+### ข้อควรระวัง
+
+- ต้องใช้ LLM ที่แข็งแกร่ง (แนะนำ 32B+ params, 32KB+ context)
+- Graph storage production → Neo4j ดีที่สุด (NetworkX เหมาะแค่ dev)
+- Embedding: BAAI/bge-m3 หรือ text-embedding-3-large
+- Reranker: BAAI/bge-reranker-v2-m3
