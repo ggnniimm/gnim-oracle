@@ -26,6 +26,7 @@ DRIVE_FOLDER_IDS: dict[str, str] = {
     "กรมบัญชีกลาง": os.getenv("DRIVE_FOLDER_CGD", ""),
     "ศาลปกครอง": os.getenv("DRIVE_FOLDER_ADMIN_COURT", ""),
     "สำนักงานอัยการสูงสุด": os.getenv("DRIVE_FOLDER_AG", ""),
+    "กฎหมาย": os.getenv("DRIVE_FOLDER_LAW", ""),
 }
 
 # --- Storage paths ---
