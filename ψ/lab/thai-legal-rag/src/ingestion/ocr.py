@@ -120,22 +120,24 @@ file_url: "https://drive.google.com/file/d/{file_id}/view"
 # [title from document]
 
 ## ข้อเท็จจริง
-[facts section verbatim]
+[คัดลอกข้อความในส่วนข้อเท็จจริงออกมาทั้งหมด verbatim]
 
 ## ประเด็นข้อหารือ
-[issues/questions]
+[คัดลอกประเด็นคำถามที่หน่วยงานขอหารือออกมาทั้งหมด verbatim ทุกข้อ เช่น ๑. ... ๒. ... ๓. ...
+ห้ามสรุปหรืออ้างอิงว่า "ตามที่กล่าวข้างต้น" ต้องคัดลอกข้อความจริงออกมาทั้งหมด]
 
 ## ข้อวินิจฉัย
-[ruling/judgment — full text verbatim]
+[คัดลอกข้อวินิจฉัยของคณะกรรมการออกมาทั้งหมด verbatim ทุกข้อ]
 
 ## สรุปข้อวินิจฉัย
-[brief bullet-point summary]
+[สรุปเป็น bullet points ไม่เกิน 5 ข้อ]
 
 ## ข้อกฎหมายที่เกี่ยวข้อง
-[list of laws with descriptions]
+[รายการกฎหมาย/ระเบียบที่อ้างอิงในเอกสาร พร้อมคำอธิบายสั้นๆ]
 
 **Rules:**
-- Extract ALL text verbatim — do NOT summarize or omit
+- คัดลอกข้อความ verbatim ทุก section — ห้ามสรุป ห้ามตัด ห้ามอ้างอิงกลับ
+- ส่วน ประเด็นข้อหารือ ต้องมีทุกประเด็นที่ปรากฏในเอกสาร (๑. ๒. ๓. ...)
 - Preserve tables as markdown tables
 - Output raw Markdown only — NO code fences (no ```)
 - YAML values with special chars must be quoted
