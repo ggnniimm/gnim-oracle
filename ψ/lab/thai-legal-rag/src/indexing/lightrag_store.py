@@ -12,7 +12,6 @@ from functools import lru_cache
 from google import genai
 import numpy as np
 from lightrag import LightRAG, QueryParam
-from lightrag.llm import gpt_4o_mini_complete
 from lightrag.utils import EmbeddingFunc
 
 from src.config import (
