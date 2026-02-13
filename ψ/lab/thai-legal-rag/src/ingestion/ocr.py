@@ -23,6 +23,7 @@ from google.genai import types as genai_types
 from src.config import (
     GEMINI_API_KEYS,
     GEMINI_FLASH_MODEL,
+    MD_BACKUP_DIR,
     OCR_CACHE_DIR,
 )
 
@@ -196,6 +197,15 @@ def _save_cache(file_id: str, data: dict) -> None:
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def save_md_backup(filename: str, text: str) -> Path:
+    """Save OCR output as human-readable .md file in md_backup/."""
+    # Use original PDF filename, replace .pdf → .md
+    stem = Path(filename).stem
+    out_path = MD_BACKUP_DIR / f"{stem}.md"
+    out_path.write_text(text, encoding="utf-8")
+    return out_path
+
+
 def _client() -> genai.Client:
     return genai.Client(api_key=_get_key())
 
@@ -331,4 +341,9 @@ def pdf_to_markdown(
     }
 
     _save_cache(file_id, result)
+
+    # Save human-readable MD backup
+    md_path = save_md_backup(filename, text)
+    logger.debug(f"MD backup saved: {md_path}")
+
     return result

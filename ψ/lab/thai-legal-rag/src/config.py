@@ -33,10 +33,11 @@ FAISS_DIR = BASE_DIR / "faiss_index"
 LIGHTRAG_DIR = BASE_DIR / "lightrag_index"
 DEDUP_DB = BASE_DIR / "dedup.db"
 OCR_CACHE_DIR = BASE_DIR / "ocr_cache"
+MD_BACKUP_DIR = BASE_DIR / "md_backup"
 FAILED_LOG_DIR = BASE_DIR / "failed_logs"
 
 # Create dirs on import
-for _d in [FAISS_DIR, LIGHTRAG_DIR, OCR_CACHE_DIR, FAILED_LOG_DIR]:
+for _d in [FAISS_DIR, LIGHTRAG_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # --- Models ---
