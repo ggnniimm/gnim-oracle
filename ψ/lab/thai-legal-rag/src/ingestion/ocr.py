@@ -360,6 +360,22 @@ def _save_cache(file_id: str, data: dict) -> None:
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def clear_cache(file_id: str) -> bool:
+    """
+    Remove OCR cache for a specific file_id.
+
+    Returns True if cache existed and was removed, False if it wasn't cached.
+    Useful when you want to re-OCR a file (e.g. after re-uploading to Drive).
+    """
+    p = _cache_path(file_id)
+    if p.exists():
+        p.unlink()
+        logger.info(f"Cleared OCR cache: {file_id} ({p.name})")
+        return True
+    logger.debug(f"No OCR cache found for: {file_id}")
+    return False
+
+
 def save_md_backup(filename: str, text: str) -> Path:
     """Save OCR output as human-readable .md file in md_backup/."""
     stem = Path(filename).stem
