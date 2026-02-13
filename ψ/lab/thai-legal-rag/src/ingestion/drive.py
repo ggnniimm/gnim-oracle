@@ -1,43 +1,65 @@
 """
-Google Drive integration.
-Authenticates via service account, lists files, streams PDF bytes.
-All config from environment — no hardcoded paths.
+Google Drive integration — OAuth2 (credentials.json).
+
+Auth flow:
+  - First run: opens browser for consent → saves token.json
+  - Subsequent runs: loads token.json, refreshes if expired
+  - token.json path: configurable via GOOGLE_TOKEN_JSON env var
+
+Config (env vars):
+  GOOGLE_CREDENTIALS_JSON  — path to credentials.json (required)
+  GOOGLE_TOKEN_JSON        — path to token.json (default: same dir as credentials)
 """
 import io
-import json
 import os
-from typing import Iterator
+from pathlib import Path
 
-from google.oauth2 import service_account
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-from src.config import GOOGLE_SERVICE_ACCOUNT_JSON, GOOGLE_DRIVE_SCOPES
+from src.config import GOOGLE_DRIVE_SCOPES
+
+_CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_JSON", "credentials.json")
+_TOKEN_PATH = os.getenv(
+    "GOOGLE_TOKEN_JSON",
+    str(Path(_CREDENTIALS_PATH).parent / "token.json"),
+)
 
 
-def _get_credentials() -> service_account.Credentials:
-    """Build service account credentials from JSON string or file path."""
-    sa_config = GOOGLE_SERVICE_ACCOUNT_JSON.strip()
-    if not sa_config:
-        raise ValueError(
-            "GOOGLE_SERVICE_ACCOUNT_JSON not set. "
-            "Set it to a JSON string or a path to the service account file."
-        )
+def _get_credentials() -> Credentials:
+    """
+    Load or refresh OAuth2 credentials.
+    First run opens browser; token is cached for future runs.
+    """
+    creds = None
 
-    if sa_config.startswith("{"):
-        info = json.loads(sa_config)
-    else:
-        with open(sa_config) as f:
-            info = json.load(f)
+    if Path(_TOKEN_PATH).exists():
+        creds = Credentials.from_authorized_user_file(_TOKEN_PATH, GOOGLE_DRIVE_SCOPES)
 
-    return service_account.Credentials.from_service_account_info(
-        info, scopes=GOOGLE_DRIVE_SCOPES
-    )
+    if not creds or not creds.valid:
+        if creds and creds.expired and creds.refresh_token:
+            creds.refresh(Request())
+        else:
+            if not Path(_CREDENTIALS_PATH).exists():
+                raise FileNotFoundError(
+                    f"credentials.json not found at: {_CREDENTIALS_PATH}\n"
+                    "Set GOOGLE_CREDENTIALS_JSON env var to the correct path."
+                )
+            flow = InstalledAppFlow.from_client_secrets_file(
+                _CREDENTIALS_PATH, GOOGLE_DRIVE_SCOPES
+            )
+            creds = flow.run_local_server(port=0)
+
+        Path(_TOKEN_PATH).write_text(creds.to_json())
+
+    return creds
 
 
 def _build_service():
-    creds = _get_credentials()
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+    return build("drive", "v3", credentials=_get_credentials(), cache_discovery=False)
 
 
 def list_files(folder_id: str, page_size: int = 200) -> list[dict]:
@@ -68,22 +90,71 @@ def list_files(folder_id: str, page_size: int = 200) -> list[dict]:
     return results
 
 
-def stream_pdf(file_id: str) -> bytes:
+def list_pdfs(folder_id: str, recursive: bool = False) -> list[dict]:
     """
-    Download a Drive file and return its raw bytes.
-    Works for both native PDFs and Google Docs exported as PDF.
+    List PDF files in a folder.
+    Set recursive=True to scan subfolders too.
     """
     service = _build_service()
-    file_meta = service.files().get(file_id=file_id, fields="mimeType,name").execute()
+    return _list_pdfs_recursive(service, folder_id) if recursive else _list_pdfs_flat(service, folder_id)
+
+
+def _list_pdfs_flat(service, folder_id: str) -> list[dict]:
+    pdf_mimes = {"application/pdf", "application/vnd.google-apps.document"}
+    all_files = list_files(folder_id)
+    return [f for f in all_files if f["mimeType"] in pdf_mimes]
+
+
+def _list_pdfs_recursive(service, folder_id: str) -> list[dict]:
+    """List PDFs including subfolders (from gdrive_eee.py pattern)."""
+    results = []
+
+    # PDFs in this folder
+    query = f"'{folder_id}' in parents and mimeType='application/pdf' and trashed=false"
+    page_token = None
+    while True:
+        response = service.files().list(
+            q=query,
+            fields="nextPageToken, files(id, name, mimeType)",
+            pageToken=page_token,
+            orderBy="name",
+        ).execute()
+        results.extend(response.get("files", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    # Recurse into subfolders
+    sub_query = f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    page_token = None
+    subfolders = []
+    while True:
+        response = service.files().list(
+            q=sub_query,
+            fields="nextPageToken, files(id, name)",
+            pageToken=page_token,
+        ).execute()
+        subfolders.extend(response.get("files", []))
+        page_token = response.get("nextPageToken")
+        if not page_token:
+            break
+
+    for sub in subfolders:
+        results.extend(_list_pdfs_recursive(service, sub["id"]))
+
+    return results
+
+
+def stream_pdf(file_id: str) -> bytes:
+    """Download a Drive file and return raw bytes (no local file saved)."""
+    service = _build_service()
+    file_meta = service.files().get(fileId=file_id, fields="mimeType,name").execute()
     mime = file_meta.get("mimeType", "")
 
     buffer = io.BytesIO()
 
     if mime == "application/vnd.google-apps.document":
-        # Export Google Doc as PDF
-        request = service.files().export_media(
-            fileId=file_id, mimeType="application/pdf"
-        )
+        request = service.files().export_media(fileId=file_id, mimeType="application/pdf")
     else:
         request = service.files().get_media(fileId=file_id)
 
@@ -93,13 +164,3 @@ def stream_pdf(file_id: str) -> bytes:
         _, done = downloader.next_chunk()
 
     return buffer.getvalue()
-
-
-def list_pdfs(folder_id: str) -> list[dict]:
-    """Convenience: list only PDF files (and Google Docs)."""
-    all_files = list_files(folder_id)
-    pdf_mimes = {
-        "application/pdf",
-        "application/vnd.google-apps.document",
-    }
-    return [f for f in all_files if f["mimeType"] in pdf_mimes]

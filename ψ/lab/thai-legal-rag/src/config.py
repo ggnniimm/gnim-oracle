@@ -15,9 +15,9 @@ GEMINI_API_KEYS: list[str] = [
     if k.strip()
 ]
 
-GOOGLE_SERVICE_ACCOUNT_JSON: str = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "")
-# Either a JSON string or a file path
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# OAuth2 paths (set via env or use defaults)
+# GOOGLE_CREDENTIALS_JSON and GOOGLE_TOKEN_JSON are read directly in drive.py
 
 # --- Google Drive ---
 DRIVE_FOLDER_IDS: dict[str, str] = {
