@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 from src.config import GEMINI_API_KEYS, GEMINI_FLASH_MODEL
 
@@ -64,22 +65,22 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
     Generate answer using retrieved chunks.
     Returns {answer, sources, model}.
     """
-    genai.configure(api_key=_get_key())
+    client = genai.Client(api_key=_get_key())
 
     context = build_context(chunks)
     user_prompt = _USER_PROMPT_TEMPLATE.format(
         question=question, context=context
     )
 
-    model = genai.GenerativeModel(
-        model_name=GEMINI_FLASH_MODEL,
-        system_instruction=_SYSTEM_PROMPT,
-    )
-
     try:
-        response = model.generate_content(
-            user_prompt,
-            generation_config={"temperature": 0.1, "max_output_tokens": 2048},
+        response = client.models.generate_content(
+            model=GEMINI_FLASH_MODEL,
+            contents=user_prompt,
+            config=genai_types.GenerateContentConfig(
+                system_instruction=_SYSTEM_PROMPT,
+                temperature=0.1,
+                max_output_tokens=2048,
+            ),
         )
         answer = response.text.strip()
     except Exception as e:

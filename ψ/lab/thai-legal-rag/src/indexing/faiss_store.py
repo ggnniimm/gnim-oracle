@@ -11,7 +11,7 @@ from pathlib import Path
 
 import faiss
 import numpy as np
-import google.generativeai as genai
+from google import genai
 
 from src.config import (
     EMBEDDING_DIM,
@@ -40,13 +40,12 @@ def _get_api_key() -> str:
 
 def _embed(texts: list[str]) -> np.ndarray:
     """Embed a list of texts using Gemini embedding model."""
-    genai.configure(api_key=_get_api_key())
-    result = genai.embed_content(
+    client = genai.Client(api_key=_get_api_key())
+    result = client.models.embed_content(
         model=GEMINI_EMBEDDING_MODEL,
-        content=texts,
-        task_type="retrieval_document",
+        contents=texts,
     )
-    vectors = np.array(result["embedding"], dtype=np.float32)
+    vectors = np.array([e.values for e in result.embeddings], dtype=np.float32)
     # Handle single text case
     if vectors.ndim == 1:
         vectors = vectors.reshape(1, -1)

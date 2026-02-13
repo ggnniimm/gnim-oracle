@@ -9,7 +9,7 @@ import asyncio
 import logging
 from functools import lru_cache
 
-import google.generativeai as genai
+from google import genai
 import numpy as np
 from lightrag import LightRAG, QueryParam
 from lightrag.llm import gpt_4o_mini_complete
@@ -40,28 +40,29 @@ def _next_key() -> str:
 
 async def _gemini_llm_func(prompt: str, **kwargs) -> str:
     """Async LLM function for LightRAG."""
-    genai.configure(api_key=_next_key())
-    model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+    client = genai.Client(api_key=_next_key())
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(
-        None, lambda: model.generate_content(prompt)
+        None,
+        lambda: client.models.generate_content(
+            model=GEMINI_FLASH_MODEL, contents=prompt
+        ),
     )
     return response.text
 
 
 async def _gemini_embedding_func(texts: list[str]) -> np.ndarray:
     """Async embedding function for LightRAG."""
-    genai.configure(api_key=_next_key())
+    client = genai.Client(api_key=_next_key())
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None,
-        lambda: genai.embed_content(
+        lambda: client.models.embed_content(
             model=GEMINI_EMBEDDING_MODEL,
-            content=texts,
-            task_type="retrieval_document",
+            contents=texts,
         ),
     )
-    vectors = np.array(result["embedding"], dtype=np.float32)
+    vectors = np.array([e.values for e in result.embeddings], dtype=np.float32)
     if vectors.ndim == 1:
         vectors = vectors.reshape(1, -1)
     return vectors

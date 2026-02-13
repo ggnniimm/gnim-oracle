@@ -17,7 +17,8 @@ import tempfile
 import time
 from pathlib import Path
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 from src.config import (
     GEMINI_API_KEYS,
@@ -142,6 +143,31 @@ file_url: "https://drive.google.com/file/d/{file_id}/view"
 """
 
 
+def _fix_frontmatter(text: str) -> str:
+    """
+    Gemini sometimes outputs YAML fields as list items inside frontmatter:
+        - type: "value"
+            - date: "value"
+    This converts them to flat key: value pairs.
+    """
+    import re
+    lines = text.splitlines()
+    in_frontmatter = False
+    result = []
+    for line in lines:
+        if line.strip() == "---":
+            in_frontmatter = not in_frontmatter
+            result.append(line)
+            continue
+        if in_frontmatter:
+            # Strip leading spaces and "- " prefix from YAML fields
+            fixed = re.sub(r"^\s*-\s+(?=[a-zA-Z_]+:)", "", line)
+            result.append(fixed)
+        else:
+            result.append(line)
+    return "\n".join(result)
+
+
 def _get_key() -> str:
     global _KEY_INDEX
     if not GEMINI_API_KEYS:
@@ -168,21 +194,24 @@ def _save_cache(file_id: str, data: dict) -> None:
     p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _upload_pdf(pdf_bytes: bytes, filename: str = "document.pdf"):
-    """Upload PDF bytes to Gemini File API. Returns uploaded file object."""
-    genai.configure(api_key=_get_key())
+def _client() -> genai.Client:
+    return genai.Client(api_key=_get_key())
 
-    # Write to temp file (File API requires a file path)
+
+def _upload_pdf(client: genai.Client, pdf_bytes: bytes, filename: str = "document.pdf"):
+    """Upload PDF bytes to Gemini File API. Returns uploaded file object."""
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
         tmp.write(pdf_bytes)
         tmp_path = tmp.name
 
     try:
-        uploaded = genai.upload_file(tmp_path, mime_type="application/pdf")
-        # Wait for processing
+        uploaded = client.files.upload(
+            file=tmp_path,
+            config={"mime_type": "application/pdf", "display_name": filename},
+        )
         while uploaded.state.name == "PROCESSING":
             time.sleep(1)
-            uploaded = genai.get_file(uploaded.name)
+            uploaded = client.files.get(name=uploaded.name)
         if uploaded.state.name == "FAILED":
             raise RuntimeError(f"Gemini file processing failed: {uploaded.name}")
         return uploaded
@@ -190,23 +219,24 @@ def _upload_pdf(pdf_bytes: bytes, filename: str = "document.pdf"):
         os.unlink(tmp_path)
 
 
-def _cleanup(uploaded_file) -> None:
+def _cleanup(client: genai.Client, uploaded_file) -> None:
     try:
-        uploaded_file.delete()
+        client.files.delete(name=uploaded_file.name)
     except Exception:
         pass
 
 
 def classify(pdf_bytes: bytes) -> dict:
     """Phase 1: Classify document type."""
-    genai.configure(api_key=_get_key())
-    model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
-
-    uploaded = _upload_pdf(pdf_bytes)
+    client = _client()
+    uploaded = _upload_pdf(client, pdf_bytes)
     try:
-        response = model.generate_content(
-            [_CLASSIFY_PROMPT, uploaded],
-            generation_config={"response_mime_type": "application/json"},
+        response = client.models.generate_content(
+            model=GEMINI_FLASH_MODEL,
+            contents=[_CLASSIFY_PROMPT, uploaded],
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+            ),
         )
         result = json.loads(response.text)
         logger.debug(f"Classified: {result.get('type')} ({result.get('confidence', 0)*100:.0f}%)")
@@ -215,13 +245,12 @@ def classify(pdf_bytes: bytes) -> dict:
         logger.warning(f"Classification failed: {e}")
         return {"type": "Unknown", "confidence": 0.0}
     finally:
-        _cleanup(uploaded)
+        _cleanup(client, uploaded)
 
 
 def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str:
     """Phase 2: Extract full content with type-specific schema."""
-    genai.configure(api_key=_get_key())
-    model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+    client = _client()
 
     schema_fields = _SCHEMA.get(doc_type, _SCHEMA["default"]).strip()
     prompt = _EXTRACT_PROMPT_TEMPLATE.format(
@@ -230,9 +259,12 @@ def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str
         file_id=file_id,
     )
 
-    uploaded = _upload_pdf(pdf_bytes, filename=filename)
+    uploaded = _upload_pdf(client, pdf_bytes, filename=filename)
     try:
-        response = model.generate_content([prompt, uploaded], stream=True)
+        response = client.models.generate_content_stream(
+            model=GEMINI_FLASH_MODEL,
+            contents=[prompt, uploaded],
+        )
         text = ""
         for chunk in response:
             if chunk.text:
@@ -246,9 +278,13 @@ def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str
             lines = lines[:-1] if lines and lines[-1].startswith("```") else lines
             text = "\n".join(lines).strip()
 
+        # Fix frontmatter: Gemini sometimes outputs "    - key: value" inside ---
+        # Convert to flat "key: value" format
+        text = _fix_frontmatter(text)
+
         return text
     finally:
-        _cleanup(uploaded)
+        _cleanup(client, uploaded)
 
 
 def pdf_to_markdown(

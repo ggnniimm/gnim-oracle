@@ -4,7 +4,8 @@ Uses Gemini Flash to generate relevant legal keywords from a user query.
 """
 import logging
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types as genai_types
 
 from src.config import GEMINI_API_KEYS, GEMINI_FLASH_MODEL
 
@@ -43,13 +44,13 @@ def expand_query(query: str) -> list[str]:
     Given a user query, return list of expanded Thai legal keywords.
     Falls back to [query] if expansion fails.
     """
-    genai.configure(api_key=_get_key())
-    model = genai.GenerativeModel(GEMINI_FLASH_MODEL)
+    client = genai.Client(api_key=_get_key())
 
     try:
-        response = model.generate_content(
-            _EXPAND_PROMPT.format(query=query),
-            generation_config={"temperature": 0.2},
+        response = client.models.generate_content(
+            model=GEMINI_FLASH_MODEL,
+            contents=_EXPAND_PROMPT.format(query=query),
+            config=genai_types.GenerateContentConfig(temperature=0.2),
         )
         text = response.text.strip()
         # Strip markdown code blocks if present
