@@ -19,7 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tqdm import tqdm
 
 from src.ingestion.drive import list_pdfs, stream_pdf
-from src.ingestion.ocr import pdf_to_text
+from src.ingestion.ocr import pdf_to_markdown
+from src.ingestion.md_loader import load_md_file
 from src.ingestion.chunker import chunk_document
 from src.ingestion.dedup import is_indexed, mark_indexed, stats as dedup_stats
 from src.indexing.manager import IndexManager
@@ -90,22 +91,36 @@ def main():
             logger.debug(f"Downloading: {file_name}")
             pdf_bytes = stream_pdf(file_id)
 
-            # 2. OCR → text
+            # 2. OCR → markdown with frontmatter (2-phase: classify + extract)
             logger.debug(f"OCR: {file_name}")
-            text = pdf_to_text(pdf_bytes, file_id=file_id)
+            ocr_result = pdf_to_markdown(pdf_bytes, file_id=file_id, filename=file_name)
+            text = ocr_result["text"]
 
             if not text.strip():
                 logger.warning(f"Empty text after OCR: {file_name}")
                 failed.append(file_id)
                 continue
 
-            # 3. Chunk
-            chunks = chunk_document(
-                text,
-                source_drive_id=file_id,
-                source_name=file_name,
-                category=args.category,
-            )
+            # Use category from OCR classification, fallback to CLI arg
+            category = ocr_result.get("category") or args.category
+            logger.debug(f"Category: {category} (confidence {ocr_result.get('confidence', 0)*100:.0f}%)")
+
+            # 3. Chunk — use md_loader for section-aware chunking (respects ## headers)
+            import tempfile, os
+            with tempfile.NamedTemporaryFile(suffix=".md", mode="w", encoding="utf-8", delete=False) as tmp:
+                tmp.write(text)
+                tmp_path = tmp.name
+            try:
+                from pathlib import Path as _Path
+                chunks = load_md_file(_Path(tmp_path))
+                # Override metadata with known values
+                for c in chunks:
+                    c.metadata["source_drive_id"] = file_id
+                    c.metadata["source_name"] = file_name
+                    if not c.metadata.get("category"):
+                        c.metadata["category"] = category
+            finally:
+                os.unlink(tmp_path)
 
             # 4. Dedup + index
             new_chunks = []
