@@ -81,6 +81,7 @@ def chunk_law_document(
             "source_drive_id": doc.file_id,
             "source_name": doc.filename,
             "source_url": f"https://drive.google.com/file/d/{doc.file_id}/view",
+            "file_url": f"https://drive.google.com/file/d/{doc.file_id}/view",
             "chunk_index": chunk_index,
             "category": "กฎหมาย",
         }

@@ -82,13 +82,19 @@ class FAISSStore:
         self._index.add(vector)
         self._metadata.append({"text": text, **metadata})
 
-    def add_batch(self, texts: list[str], metadatas: list[dict]) -> None:
+    def add_batch(self, texts: list[str], metadatas: list[dict], batch_size: int = 100) -> None:
+        """Embed and add texts in batches of batch_size (API limit: 100)."""
         if not texts:
             return
-        vectors = _embed(texts)
-        self._index.add(vectors)
-        for text, meta in zip(texts, metadatas):
-            self._metadata.append({"text": text, **meta})
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            batch_metas = metadatas[i:i + batch_size]
+            vectors = _embed(batch_texts)
+            self._index.add(vectors)
+            for text, meta in zip(batch_texts, batch_metas):
+                self._metadata.append({"text": text, **meta})
+            if len(texts) > batch_size:
+                logger.debug(f"Embedded batch {i//batch_size + 1}/{(len(texts)-1)//batch_size + 1} ({len(batch_texts)} texts)")
 
     def search(self, query: str, k: int = FAISS_TOP_K) -> list[dict]:
         """Returns list of {text, score, **metadata}."""

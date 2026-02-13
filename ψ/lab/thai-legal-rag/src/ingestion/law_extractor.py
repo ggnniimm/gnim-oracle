@@ -86,44 +86,83 @@ class LawDocument:
 def _detect_law_meta(text: str, filename: str) -> tuple[str, str, str, str]:
     """
     Detect (law_name, law_short_name, law_type, law_year_be) from text + filename.
-    Returns reasonable defaults if not found.
+
+    Priority: filename keywords → first non-empty lines of text → defaults.
+    This avoids false positives where a ระเบียบ body references พ.ร.บ. early on.
     """
-    # Look in first 2000 chars for the official name
-    head = text[:2000]
+    stem = Path(filename).stem.lower()
 
-    law_type = "กฎหมาย"
-    if "พระราชบัญญัติ" in head:
+    # ── Step 1: law_type from filename (most reliable) ─────────────────────
+    # "พรบ" must be checked before "ประกาศ" — "ประกาศราชกิจจา" is publication venue, not doc type
+    if "พรบ" in stem or "พ.ร.บ" in stem:
         law_type = "พระราชบัญญัติ"
-    elif "ระเบียบกระทรวง" in head or "ระเบียบ" in head[:500]:
+    elif "ระเบียบ" in stem:
         law_type = "ระเบียบ"
-    elif "กฎกระทรวง" in head:
+    elif "กฎกระทรวง" in stem:
         law_type = "กฎกระทรวง"
-    elif "ประกาศ" in head:
+    elif "ประกาศ" in stem and "ราชกิจจา" not in stem:
         law_type = "ประกาศ"
+    else:
+        # Fall back to scanning first 300 chars (before body references other laws)
+        head300 = text[:300]
+        if "ระเบียบกระทรวง" in head300 or "ระเบียบ" in head300:
+            law_type = "ระเบียบ"
+        elif "กฎกระทรวง" in head300:
+            law_type = "กฎกระทรวง"
+        elif "พระราชบัญญัติ" in head300:
+            law_type = "พระราชบัญญัติ"
+        else:
+            law_type = "กฎหมาย"
 
-    # Extract BE year — look for พ.ศ. ๒๕๖๐ or พ.ศ. 2560 pattern
-    year_m = re.search(r"พ\.ศ\.\s*([๐-๙]{4}|\d{4})", head)
+    # ── Step 2: BE year from text ──────────────────────────────────────────
+    year_m = re.search(r"พ\.ศ\.\s*([๐-๙]{4}|\d{4})", text[:3000])
     law_year_be = _to_arabic(year_m.group(1)) if year_m else ""
 
-    # Try to extract full law name (first line that starts with law_type)
-    name_m = re.search(
-        rf"({law_type}[^\n{{}}]+(?:พ\.ศ\.\s*[๐-๙\d]+)?)",
+    # ── Step 3: full law name ──────────────────────────────────────────────
+    # Look for full name starting with law_type keyword (skip very short matches)
+    head = text[:3000]
+    # Collect all matches, pick the longest one that includes year
+    candidates = re.findall(
+        rf"({law_type}[^\n\r{{}}]+(?:พ\.ศ\.\s*[๐-๙\d]+)?)",
         head,
     )
-    law_name = name_m.group(1).strip() if name_m else Path(filename).stem
+    if candidates:
+        # Prefer the FIRST candidate that includes พ.ศ. (= title line, not body)
+        with_year = [c for c in candidates if "พ.ศ." in c]
+        law_name = (with_year[0] if with_year else candidates[0]).strip()
+        # Remove trailing artifacts
+        law_name = re.sub(r"\s+", " ", law_name).strip()
+    else:
+        law_name = Path(filename).stem.replace("+", " ").replace("-", " ").strip()
 
-    # Short name
-    short_map = {
-        "พระราชบัญญัติการจัดซื้อจัดจ้าง": "พ.ร.บ.จัดซื้อจัดจ้างฯ",
-        "ระเบียบกระทรวงการคลังว่าด้วยการจัดซื้อจัดจ้าง": "ระเบียบฯ จัดซื้อจัดจ้าง",
-        "กฎกระทรวง": "กฎกระทรวง",
-    }
-    law_short_name = law_name
-    for key, short in short_map.items():
-        if key in law_name:
-            suffix = f" {law_year_be}" if law_year_be else ""
-            law_short_name = f"{short}{suffix}"
-            break
+    # ── Step 4: short name — derive from filename keywords (most reliable) ──
+    suffix = f" {law_year_be}" if law_year_be else ""
+    stem_clean = Path(filename).stem.lower()
+    if "พรบ" in stem_clean or "พ.ร.บ" in stem_clean:
+        if "จัดซื้อ" in stem_clean or "จัดซื้อจัดจ้าง" in law_name:
+            law_short_name = f"พ.ร.บ.จัดซื้อจัดจ้างฯ{suffix}"
+        else:
+            law_short_name = f"พ.ร.บ.ฯ{suffix}"
+    elif "ระเบียบ" in stem_clean:
+        if "จัดซื้อ" in stem_clean or "จัดซื้อจัดจ้าง" in law_name or "จัดซื้อจัดจ้าง" in text[:1000]:
+            law_short_name = f"ระเบียบฯ จัดซื้อจัดจ้าง{suffix}"
+        else:
+            law_short_name = f"ระเบียบฯ{suffix}"
+    elif "กฎกระทรวง" in stem_clean:
+        law_short_name = f"กฎกระทรวงฯ{suffix}"
+    else:
+        # Try text-based short name
+        short_map = [
+            ("พระราชบัญญัติการจัดซื้อจัดจ้าง",           f"พ.ร.บ.จัดซื้อจัดจ้างฯ{suffix}"),
+            ("ระเบียบกระทรวงการคลังว่าด้วยการจัดซื้อจัดจ้าง", f"ระเบียบฯ จัดซื้อจัดจ้าง{suffix}"),
+        ]
+        law_short_name = law_name
+        for key, short in short_map:
+            if key in law_name:
+                law_short_name = short
+                break
+        if law_short_name == law_name and len(law_short_name) < 8:
+            law_short_name = f"{law_type}ฯ{suffix}"
 
     return law_name, law_short_name, law_type, law_year_be
 
