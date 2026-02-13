@@ -8,7 +8,6 @@ import asyncio
 import logging
 
 from src.indexing.faiss_store import FAISSStore
-from src.indexing.lightrag_store import LightRAGStore
 from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K
 
 logger = logging.getLogger(__name__)
@@ -17,8 +16,12 @@ logger = logging.getLogger(__name__)
 class IndexManager:
     def __init__(self, use_lightrag: bool = True):
         self.faiss = FAISSStore()
-        self.lightrag = LightRAGStore() if use_lightrag else None
         self._use_lightrag = use_lightrag
+        if use_lightrag:
+            from src.indexing.lightrag_store import LightRAGStore
+            self.lightrag = LightRAGStore()
+        else:
+            self.lightrag = None
 
     def add(self, text: str, metadata: dict) -> None:
         """

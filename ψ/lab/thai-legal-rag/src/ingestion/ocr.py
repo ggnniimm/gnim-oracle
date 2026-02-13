@@ -10,11 +10,13 @@ no page rendering needed. Much higher quality than image-based OCR.
 Cache: SHA256(file_id) → JSON (skip re-OCR on repeat runs)
 """
 import hashlib
+import io
 import json
 import logging
 import os
 import tempfile
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 from google import genai
@@ -41,52 +43,77 @@ DOC_TYPE_CATEGORY = {
     "Unknown": "อื่นๆ",
 }
 
-# Type-specific frontmatter schema instructions
+# Type-specific frontmatter schema instructions for Gemini to fill
 _SCHEMA = {
     "Ruling_Committee": """
-    - type: "ข้อหารือ กวจ."
-    - date: "YYYY-MM-DD" (จากหัวเอกสาร)
-    - ref_number: "เลขที่หนังสือ เช่น ที่ กค (กวจ) 0405.4/XXXXX"
-    - topic: "เรื่อง (subject line เต็ม)"
-    - signer: "ชื่อผู้ลงนาม"
-    - tags: [list of relevant Thai legal keywords]
-    - law_section: [list of specific laws/articles referenced, e.g. "พ.ร.บ.จัดซื้อฯ มาตรา 93"]
-    """,
+doc_type: "ข้อหารือ"
+issued_by: "กวจ."
+date: "YYYY-MM-DD"  (วันที่จากหัวเอกสาร ใช้ปี ค.ศ. CE เท่านั้น เช่น 2023-07-27)
+date_be: "YYYY-MM-DD"  (วันที่เดียวกัน แต่ปี พ.ศ. BE = CE+543 เช่น 2566-07-27)
+doc_number: "เลขที่หนังสือเต็ม เช่น ที่ กค (กวจ) ๐๔๐๕.๒/๓๒๖๑๖"
+title: "เรื่อง (subject line เต็ม verbatim จากเอกสาร)"
+topic: "หมวดหมู่หลักของเนื้อหา เช่น ค่าปรับ | การตรวจรับงาน | การบอกเลิกสัญญา | ราคากลาง"
+subtopic: "หมวดหมู่ย่อยที่เจาะจงกว่า topic"
+signer: "ชื่อผู้ลงนาม"
+laws_referenced: ["ชื่อกฎหมาย มาตรา/ข้อ เช่น พ.ร.บ.จัดซื้อจัดจ้างฯ พ.ศ. ๒๕๖๐ มาตรา ๖๐"]
+quality: "good|review-needed|low"  (ประเมินคุณภาพ OCR ของตัวเอง)
+quality_note: ""  (ถ้าไม่ใช่ good ให้ระบุสาเหตุ เช่น "หน้า 3 ภาพเบลอ")
+""",
     "Ruling_Court": """
-    - type: "คำพิพากษาศาลปกครอง"
-    - date: "YYYY-MM-DD"
-    - ref_number: "เลขคดี"
-    - topic: "เรื่อง"
-    - court: "ชื่อศาล เช่น ศาลปกครองสูงสุด"
-    - tags: [list of relevant Thai legal keywords]
-    - law_section: [list of laws/articles referenced]
-    """,
+doc_type: "คำพิพากษา"
+issued_by: "ศาลปกครอง"
+date: "YYYY-MM-DD"  (ค.ศ. CE)
+date_be: "YYYY-MM-DD"  (พ.ศ. BE = CE+543)
+doc_number: "เลขคดี"
+title: "ชื่อคดี (verbatim)"
+topic: "หมวดหมู่หลักของเนื้อหา"
+subtopic: "หมวดหมู่ย่อย"
+court: "ชื่อศาล เช่น ศาลปกครองสูงสุด"
+laws_referenced: ["กฎหมาย มาตรา/ข้อที่อ้างอิง"]
+quality: "good|review-needed|low"
+quality_note: ""
+""",
     "Ruling_AttorneyGeneral": """
-    - type: "ข้อหารืออัยการสูงสุด"
-    - date: "YYYY-MM-DD"
-    - ref_number: "เลขที่หนังสือ"
-    - topic: "เรื่อง"
-    - signer: "ชื่อผู้ลงนาม"
-    - tags: [list of relevant Thai legal keywords]
-    - law_section: [list of laws/articles referenced]
-    """,
+doc_type: "ข้อหารือ"
+issued_by: "สำนักงานอัยการสูงสุด"
+date: "YYYY-MM-DD"  (ค.ศ. CE)
+date_be: "YYYY-MM-DD"  (พ.ศ. BE = CE+543)
+doc_number: "เลขที่หนังสือ"
+title: "เรื่อง (subject line เต็ม verbatim)"
+topic: "หมวดหมู่หลักของเนื้อหา"
+subtopic: "หมวดหมู่ย่อย"
+signer: "ชื่อผู้ลงนาม"
+laws_referenced: ["กฎหมาย มาตรา/ข้อที่อ้างอิง"]
+quality: "good|review-needed|low"
+quality_note: ""
+""",
     "Circular": """
-    - type: "หนังสือเวียน"
-    - date: "YYYY-MM-DD"
-    - ref_number: "เลขที่ ว..."
-    - topic: "เรื่อง"
-    - signer: "ชื่อผู้ลงนาม"
-    - tags: [list of relevant Thai legal keywords]
-    - law_section: [list of laws/articles referenced]
-    """,
+doc_type: "หนังสือเวียน"
+issued_by: "กรมบัญชีกลาง"
+date: "YYYY-MM-DD"  (ค.ศ. CE)
+date_be: "YYYY-MM-DD"  (พ.ศ. BE = CE+543)
+doc_number: "เลขที่ ว..."
+title: "เรื่อง (subject line เต็ม verbatim)"
+topic: "หมวดหมู่หลักของเนื้อหา"
+subtopic: "หมวดหมู่ย่อย"
+signer: "ชื่อผู้ลงนาม"
+laws_referenced: ["กฎหมาย มาตรา/ข้อที่อ้างอิง"]
+quality: "good|review-needed|low"
+quality_note: ""
+""",
     "default": """
-    - type: "อื่นๆ"
-    - date: "YYYY-MM-DD"
-    - ref_number: "เลขที่อ้างอิง"
-    - topic: "หัวข้อ/เรื่อง"
-    - tags: []
-    - law_section: []
-    """,
+doc_type: "อื่นๆ"
+issued_by: ""
+date: "YYYY-MM-DD"  (ค.ศ. CE)
+date_be: "YYYY-MM-DD"  (พ.ศ. BE = CE+543)
+doc_number: ""
+title: "หัวข้อ/เรื่อง (verbatim)"
+topic: "หมวดหมู่หลัก"
+subtopic: ""
+laws_referenced: []
+quality: "good|review-needed|low"
+quality_note: ""
+""",
 }
 
 _CLASSIFY_PROMPT = """
@@ -112,7 +139,7 @@ Convert this PDF into Markdown with a YAML Frontmatter block.
 **Output format — EXACTLY this structure:**
 
 ---
-source_file: {filename}
+original_filename: {filename}
 {schema_fields}
 file_id: "{file_id}"
 file_url: "https://drive.google.com/file/d/{file_id}/view"
@@ -133,16 +160,15 @@ file_url: "https://drive.google.com/file/d/{file_id}/view"
 ## สรุปข้อวินิจฉัย
 [สรุปเป็น bullet points ไม่เกิน 5 ข้อ]
 
-## ข้อกฎหมายที่เกี่ยวข้อง
-[รายการกฎหมาย/ระเบียบที่อ้างอิงในเอกสาร พร้อมคำอธิบายสั้นๆ]
-
 **Rules:**
 - คัดลอกข้อความ verbatim ทุก section — ห้ามสรุป ห้ามตัด ห้ามอ้างอิงกลับ
 - ส่วน ประเด็นข้อหารือ ต้องมีทุกประเด็นที่ปรากฏในเอกสาร (๑. ๒. ๓. ...)
+- date ต้องใช้ปี ค.ศ. (CE) เสมอ เช่น 2023-07-27 ไม่ใช่ 2566-07-27
+- date_be ใช้ปี พ.ศ. (BE = CE + 543) เช่น 2566-07-27
 - Preserve tables as markdown tables
 - Output raw Markdown only — NO code fences (no ```)
 - YAML values with special chars must be quoted
-- tags and law_section must be YAML lists
+- tags and laws_referenced must be YAML lists
 """
 
 
@@ -163,12 +189,49 @@ def _fix_frontmatter(text: str) -> str:
             result.append(line)
             continue
         if in_frontmatter:
-            # Strip leading spaces and "- " prefix from YAML fields
+            # Case 1: "  - key: value" → "key: value"
             fixed = re.sub(r"^\s*-\s+(?=[a-zA-Z_]+:)", "", line)
+            # Case 2: "  key: value" (indented but no dash) → "key: value"
+            # Only strip indent from top-level scalar fields, not list items under them
+            if fixed == line and re.match(r"^\s{2,}[a-zA-Z_]+:", line):
+                fixed = line.lstrip()
             result.append(fixed)
         else:
             result.append(line)
     return "\n".join(result)
+
+
+def _inject_frontmatter_fields(text: str, fields: dict) -> str:
+    """Inject additional key: value fields before closing --- of frontmatter."""
+    lines = text.splitlines()
+    dash_count = 0
+    insert_at = -1
+    for i, line in enumerate(lines):
+        if line.strip() == "---":
+            dash_count += 1
+            if dash_count == 2:
+                insert_at = i
+                break
+    if insert_at == -1:
+        return text
+
+    new_lines = []
+    for key, val in fields.items():
+        if isinstance(val, str):
+            new_lines.append(f'{key}: "{val}"')
+        else:
+            new_lines.append(f'{key}: {val}')
+
+    return "\n".join(lines[:insert_at] + new_lines + lines[insert_at:])
+
+
+def _get_page_count(pdf_bytes: bytes) -> int:
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(io.BytesIO(pdf_bytes))
+        return len(reader.pages)
+    except Exception:
+        return 0
 
 
 def _get_key() -> str:
@@ -199,7 +262,6 @@ def _save_cache(file_id: str, data: dict) -> None:
 
 def save_md_backup(filename: str, text: str) -> Path:
     """Save OCR output as human-readable .md file in md_backup/."""
-    # Use original PDF filename, replace .pdf → .md
     stem = Path(filename).stem
     out_path = MD_BACKUP_DIR / f"{stem}.md"
     out_path.write_text(text, encoding="utf-8")
@@ -290,8 +352,7 @@ def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str
             lines = lines[:-1] if lines and lines[-1].startswith("```") else lines
             text = "\n".join(lines).strip()
 
-        # Fix frontmatter: Gemini sometimes outputs "    - key: value" inside ---
-        # Convert to flat "key: value" format
+        # Fix frontmatter indentation issues
         text = _fix_frontmatter(text)
 
         return text
@@ -330,6 +391,17 @@ def pdf_to_markdown(
 
     # Phase 2: Extract
     text = extract(pdf_bytes, file_id=file_id, filename=filename, doc_type=doc_type)
+
+    # Inject pipeline-generated fields into frontmatter
+    ocr_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    page_count = _get_page_count(pdf_bytes)
+    text = _inject_frontmatter_fields(text, {
+        "page_count": page_count,
+        "ocr_engine": GEMINI_FLASH_MODEL,
+        "ocr_date": ocr_date,
+        "status": "active",
+        "status_note": "unverified",
+    })
 
     result = {
         "text": text,

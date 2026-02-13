@@ -21,7 +21,8 @@ GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
 # --- Google Drive ---
 DRIVE_FOLDER_IDS: dict[str, str] = {
-    # category_name -> folder_id  (set via env: DRIVE_FOLDER_CGD, etc.)
+    # category_name -> folder_id  (set via env: DRIVE_FOLDER_GVAJ, etc.)
+    "ข้อหารือ กวจ.": os.getenv("DRIVE_FOLDER_GVAJ", ""),
     "กรมบัญชีกลาง": os.getenv("DRIVE_FOLDER_CGD", ""),
     "ศาลปกครอง": os.getenv("DRIVE_FOLDER_ADMIN_COURT", ""),
     "สำนักงานอัยการสูงสุด": os.getenv("DRIVE_FOLDER_AG", ""),
@@ -42,8 +43,8 @@ for _d in [FAISS_DIR, LIGHTRAG_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR
 
 # --- Models ---
 GEMINI_FLASH_MODEL = "gemini-2.0-flash"
-GEMINI_EMBEDDING_MODEL = "models/text-embedding-004"
-EMBEDDING_DIM = 768  # text-embedding-004 default output dim
+GEMINI_EMBEDDING_MODEL = "models/gemini-embedding-001"
+EMBEDDING_DIM = 3072  # gemini-embedding-001 default output dim
 
 # --- Chunking ---
 CHUNK_SIZE = 400       # tokens / chars

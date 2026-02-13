@@ -10,6 +10,7 @@ google-genai==1.63.0
 
 # PDF processing
 PyMuPDF==1.25.2       # fitz: PDF → images for OCR
+pypdf==5.1.0          # page count, metadata
 
 # Vector store
 faiss-cpu==1.9.0
