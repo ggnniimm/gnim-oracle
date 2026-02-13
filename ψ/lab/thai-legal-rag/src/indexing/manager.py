@@ -13,6 +13,10 @@ from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K
 logger = logging.getLogger(__name__)
 
 
+async def _empty_coroutine() -> list:
+    return []
+
+
 class IndexManager:
     def __init__(self, use_lightrag: bool = True):
         self.faiss = FAISSStore()
@@ -68,7 +72,7 @@ class IndexManager:
         lightrag_task = (
             self.lightrag.search(query, k=lightrag_k)
             if self._use_lightrag and self.lightrag
-            else asyncio.coroutine(lambda: [])()
+            else _empty_coroutine()
         )
 
         faiss_results, lightrag_results = await asyncio.gather(
