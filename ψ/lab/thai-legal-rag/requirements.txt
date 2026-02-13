@@ -29,6 +29,9 @@ python-dotenv==1.0.1
 # Dedup DB
 # sqlite3 is stdlib — no extra dep needed
 
+# YAML frontmatter parsing
+pyyaml==6.0.2
+
 # UI
 streamlit==1.42.0
 
