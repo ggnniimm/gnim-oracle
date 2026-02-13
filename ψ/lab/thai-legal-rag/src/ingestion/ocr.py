@@ -54,7 +54,6 @@ doc_number: "เลขที่หนังสือเต็ม เช่น �
 title: "เรื่อง (subject line เต็ม verbatim จากเอกสาร)"
 topic: "หมวดหมู่หลักของเนื้อหา เช่น ค่าปรับ | การตรวจรับงาน | การบอกเลิกสัญญา | ราคากลาง"
 subtopic: "หมวดหมู่ย่อยที่เจาะจงกว่า topic"
-signer: "ชื่อผู้ลงนาม"
 laws_referenced: ["ชื่อกฎหมาย มาตรา/ข้อ เช่น พ.ร.บ.จัดซื้อจัดจ้างฯ พ.ศ. ๒๕๖๐ มาตรา ๖๐"]
 quality: "good|review-needed|low"  (ประเมินคุณภาพ OCR ของตัวเอง)
 quality_note: ""  (ถ้าไม่ใช่ good ให้ระบุสาเหตุ เช่น "หน้า 3 ภาพเบลอ")
@@ -69,6 +68,7 @@ title: "ชื่อคดี (verbatim)"
 topic: "หมวดหมู่หลักของเนื้อหา"
 subtopic: "หมวดหมู่ย่อย"
 court: "ชื่อศาล เช่น ศาลปกครองสูงสุด"
+
 laws_referenced: ["กฎหมาย มาตรา/ข้อที่อ้างอิง"]
 quality: "good|review-needed|low"
 quality_note: ""
@@ -82,7 +82,6 @@ doc_number: "เลขที่หนังสือ"
 title: "เรื่อง (subject line เต็ม verbatim)"
 topic: "หมวดหมู่หลักของเนื้อหา"
 subtopic: "หมวดหมู่ย่อย"
-signer: "ชื่อผู้ลงนาม"
 laws_referenced: ["กฎหมาย มาตรา/ข้อที่อ้างอิง"]
 quality: "good|review-needed|low"
 quality_note: ""
@@ -96,7 +95,6 @@ doc_number: "เลขที่ ว..."
 title: "เรื่อง (subject line เต็ม verbatim)"
 topic: "หมวดหมู่หลักของเนื้อหา"
 subtopic: "หมวดหมู่ย่อย"
-signer: "ชื่อผู้ลงนาม"
 laws_referenced: ["กฎหมาย มาตรา/ข้อที่อ้างอิง"]
 quality: "good|review-needed|low"
 quality_note: ""
@@ -223,6 +221,108 @@ def _inject_frontmatter_fields(text: str, fields: dict) -> str:
             new_lines.append(f'{key}: {val}')
 
     return "\n".join(lines[:insert_at] + new_lines + lines[insert_at:])
+
+
+_ARABIC_TO_THAI = str.maketrans("0123456789", "๐๑๒๓๔๕๖๗๘๙")
+_THAI_TO_ARABIC = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def _fix_date_from_filename(text: str, filename: str) -> str:
+    """
+    Cross-check date_be (and date) against the filename's date segment.
+
+    Filename pattern: {prefix}_{กวจ}_{DOC_NUM}_{DATE_DDMMYY}_{TITLE}.pdf
+    Date segment is immediately after doc_num: 6-digit string DDMMYY
+      DD = day, MM = month, YY = last 2 digits of BE year (e.g. 68 → 2568 BE → 2025 CE)
+
+    Example: 250468 → date_be: "2568-04-25", date: "2025-04-25"
+    """
+    import re
+
+    stem = Path(filename).stem
+    parts = stem.split("_")
+    # Date segment is i+2 from the segment containing "กวจ"
+    date_str = None
+    for i, part in enumerate(parts):
+        if "กวจ" in part and i + 2 < len(parts):
+            candidate = parts[i + 2]
+            if len(candidate) == 6 and candidate.isdigit():
+                date_str = candidate
+                break
+    if not date_str:
+        return text
+
+    dd = date_str[0:2]
+    mm = date_str[2:4]
+    yy = date_str[4:6]
+    be_year = f"25{yy}"
+    ce_year = str(int(be_year) - 543)
+    expected_date_be = f"{be_year}-{mm}-{dd}"
+    expected_date = f"{ce_year}-{mm}-{dd}"
+
+    def fix_date_be(m):
+        current = m.group(1)
+        if current != expected_date_be:
+            logger.info(
+                f"date_be mismatch: OCR={current!r} filename={expected_date_be!r} — correcting"
+            )
+            return f'date_be: "{expected_date_be}"'
+        return m.group(0)
+
+    def fix_date(m):
+        current = m.group(1)
+        if current != expected_date:
+            logger.info(
+                f"date mismatch: OCR={current!r} filename={expected_date!r} — correcting"
+            )
+            return f'date: "{expected_date}"'
+        return m.group(0)
+
+    text = re.sub(r'date_be:\s*"([^"]+)"', fix_date_be, text)
+    text = re.sub(r'(?<![_\w])date:\s*"([^"]+)"', fix_date, text)
+    return text
+
+
+def _fix_doc_number_from_filename(text: str, filename: str) -> str:
+    """
+    Cross-check doc_number's trailing number against the filename.
+
+    Filename pattern: {prefix}_{กวจ}_{DOC_NUM}_{DATE}_{TITLE}.pdf
+    The second purely-numeric segment is the authoritative doc number.
+
+    If OCR misread the handwritten number, replace it with the correct one.
+    """
+    import re
+
+    stem = Path(filename).stem  # strip .pdf
+    parts = stem.split("_")
+    # Doc number is the purely-numeric segment immediately after the segment containing "กวจ"
+    filename_num = None
+    for i, part in enumerate(parts):
+        if "กวจ" in part and i + 1 < len(parts):
+            candidate = parts[i + 1]
+            if candidate.isdigit():
+                filename_num = candidate
+                break
+    if not filename_num:
+        return text
+
+    # Find doc_number: "..." in frontmatter and fix the part after the last /
+    def fix_match(m):
+        value = m.group(1)
+        if "/" in value:
+            prefix_part, num_part = value.rsplit("/", 1)
+            # Convert Thai numerals → Arabic for comparison
+            num_arabic = num_part.strip().translate(_THAI_TO_ARABIC)
+            if num_arabic != filename_num:
+                logger.info(
+                    f"doc_number mismatch: OCR={num_arabic!r} filename={filename_num!r} — correcting"
+                )
+                thai_num = filename_num.translate(_ARABIC_TO_THAI)
+                return f'doc_number: "{prefix_part}/{thai_num}"'
+        return m.group(0)
+
+    return re.sub(r'doc_number:\s*"([^"]+)"', fix_match, text)
 
 
 def _get_page_count(pdf_bytes: bytes) -> int:
@@ -391,6 +491,12 @@ def pdf_to_markdown(
 
     # Phase 2: Extract
     text = extract(pdf_bytes, file_id=file_id, filename=filename, doc_type=doc_type)
+
+    # Cross-check doc_number against filename (filename is authoritative for the numeric part)
+    text = _fix_doc_number_from_filename(text, filename)
+
+    # Cross-check date against filename's DDMMYY segment (filename is authoritative)
+    text = _fix_date_from_filename(text, filename)
 
     # Inject pipeline-generated fields into frontmatter
     ocr_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
