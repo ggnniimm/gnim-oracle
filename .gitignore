@@ -1,2 +1,4 @@
 .env
 ψ/learn/**/origin
+credentials.json
+token.json
