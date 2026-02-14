@@ -286,6 +286,9 @@ def _normalize_section_headers(text: str) -> str:
 
 # ── Paragraph splitter ─────────────────────────────────────────────────────────
 
+# Minimum content chars to attempt Gemini paragraph splitting
+_PARA_GEMINI_MIN_CHARS = 300
+
 _LIST_ITEM_RE = re.compile(r"^\([ก-ฮ๐-๙\d]+\)")
 
 # Definite new-paragraph starters: Thai legal subjects/authorities that virtually
@@ -297,6 +300,47 @@ _DEFINITE_SUBJECT_RE = re.compile(
     r"|หัวหน้า|ผู้อํานวยการ|ผู้อำนวยการ|กรมการ|ผู้บัญชาการ)",
     re.UNICODE,
 )
+
+
+def _split_paragraphs_gemini(content: str) -> list[str] | None:
+    """Use Gemini to split section content into วรรค.
+
+    Args:
+        content: Section text WITHOUT the label line (มาตรา XX / ข้อ XX).
+
+    Returns:
+        List of paragraph strings if successful and >1 paragraph found, else None.
+    """
+    if not GEMINI_API_KEYS:
+        return None
+    try:
+        from google import genai
+
+        client = genai.Client(api_key=GEMINI_API_KEYS[0])
+        prompt = (
+            "แบ่งข้อความกฎหมายไทยต่อไปนี้เป็นวรรค (paragraph) ตามความหมายทางกฎหมาย\n"
+            "กฎ:\n"
+            "- list items เช่น (ก)(ข)(ค) หรือ (๑)(๒)(๓) ให้รวมไว้ในวรรคก่อนหน้า\n"
+            "- ตอบเป็น JSON array of strings เท่านั้น ห้ามมี markdown หรือคำอธิบายเพิ่ม\n"
+            "- แต่ละ element คือข้อความ 1 วรรค ไม่ต้องใส่เลขวรรค\n\n"
+            f"ข้อความ:\n{content}"
+        )
+        response = client.models.generate_content(
+            model=GEMINI_FLASH_MODEL,
+            contents=prompt,
+        )
+        raw = (response.text or "").strip()
+        # Strip markdown code fences if present
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw.strip())
+        parsed = json.loads(raw)
+        if isinstance(parsed, list) and all(isinstance(p, str) for p in parsed):
+            result = [p.strip() for p in parsed if p.strip()]
+            if len(result) > 1:
+                return result
+    except Exception as e:
+        logger.debug(f"Gemini paragraph split failed: {e}")
+    return None
 
 
 def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
@@ -345,19 +389,24 @@ def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
 def _split_paragraphs(section_text: str) -> list[str]:
     """Split a section's text into วรรค (paragraphs).
 
-    Rules:
+    Phase 1 — blank-line split:
     - Skips the label line (มาตรา XX / ข้อ XX)
     - Splits by blank/whitespace-only lines
     - Merges list items (ก)(ข)(ค) or (๑)(๒)(๓) back into the preceding วรรค
     - Detects trailing non-continuation content inside a list-item block and
-      splits it off as a new วรรค (handles the case where the closing paragraph
-      is attached to the last list item with no blank line)
+      splits it off as a new วรรค
+
+    Phase 2 — Gemini fallback:
+    - If phase 1 yields only 1 paragraph and the content is long (≥ _PARA_GEMINI_MIN_CHARS),
+      Gemini is asked to identify วรรค boundaries. This handles PDFs where page layout
+      yields no blank lines between paragraphs.
     """
     lines = section_text.strip().splitlines()
     # Drop the label line
     content_lines = lines[1:] if lines and _SECTION_START_RE.match(lines[0].strip()) else lines
-    # Split by blank/whitespace-only lines
     content = "\n".join(content_lines)
+
+    # Phase 1: blank-line split
     raw_paras = re.split(r"\n(?:[ \t]*\n)+", content)
 
     paragraphs: list[str] = []
@@ -366,13 +415,19 @@ def _split_paragraphs(section_text: str) -> list[str]:
         if not para:
             continue
         if paragraphs and _LIST_ITEM_RE.match(para):
-            # Merge list item into previous วรรค, but detect trailing new-paragraph content
             merged, tail = _split_list_para(para, paragraphs[-1])
             paragraphs[-1] = merged
             if tail:
                 paragraphs.append(tail)
         else:
             paragraphs.append(para)
+
+    # Phase 2: Gemini fallback when blank-line split couldn't find boundaries
+    if len(paragraphs) == 1 and len(content.strip()) >= _PARA_GEMINI_MIN_CHARS:
+        gemini_result = _split_paragraphs_gemini(content)
+        if gemini_result:
+            logger.debug(f"Gemini split: 1 → {len(gemini_result)} วรรค")
+            return gemini_result
 
     return paragraphs
 
@@ -502,6 +557,77 @@ def _save_md_backup(doc: LawDocument) -> Path:
     return out_path
 
 
+# ── Per-section MD files ───────────────────────────────────────────────────────
+
+def _section_filename(law_type: str, number: str) -> str:
+    """Generate a per-section filename, e.g. มาตรา_056.md or ขอ_056.md."""
+    prefix = "มาตรา" if law_type == "พระราชบัญญัติ" else "ข้อ"
+    # Handle inserted sections like "60/1" → "060_1"
+    if "/" in number:
+        main, sub = number.split("/", 1)
+        padded = f"{int(main):03d}_{sub}" if main.isdigit() else f"{main}_{sub}"
+    else:
+        padded = f"{int(number):03d}" if number.isdigit() else number
+    return f"{prefix}_{padded}.md"
+
+
+def _build_section_md(doc: LawDocument, sec: LawSection) -> str:
+    """Build markdown text for a single section file with YAML frontmatter."""
+    # Build context header: [law_short_name | part | chapter | มาตรา X]
+    ctx_parts = [doc.law_short_name or doc.law_name]
+    if sec.part:
+        ctx_parts.append(sec.part)
+    if sec.chapter:
+        ctx_parts.append(sec.chapter)
+    section_label = f"มาตรา {sec.number}" if doc.law_type == "พระราชบัญญัติ" else f"ข้อ {sec.number}"
+    ctx_parts.append(section_label)
+    context_header = "[" + " | ".join(ctx_parts) + "]"
+
+    # Strip any page header artifacts that survived into section text (e.g. from old cache)
+    section_text = _strip_page_headers(sec.text)
+
+    # Escape double quotes in YAML string values
+    def _esc(s: str) -> str:
+        return s.replace('"', '\\"')
+
+    lines = [
+        "---",
+        f'law_name: "{_esc(doc.law_name)}"',
+        f'law_short_name: "{_esc(doc.law_short_name)}"',
+        f'law_type: "{doc.law_type}"',
+        f'law_year_be: "{doc.law_year_be}"',
+        f'part: "{_esc(sec.part)}"',
+        f'chapter: "{_esc(sec.chapter)}"',
+        f'section: "{sec.number}"',
+        f"total_paragraphs: {len(sec.paragraphs)}",
+        f'file_id: "{doc.file_id}"',
+        f'file_url: "https://drive.google.com/file/d/{doc.file_id}/view"',
+        f'status: "active"',
+        "---",
+        "",
+        context_header,
+        "",
+        section_text,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _save_section_files(doc: LawDocument) -> Path:
+    """Write one MD file per section into {MD_BACKUP_DIR}/{stem}/."""
+    stem = Path(doc.filename).stem
+    sections_dir = MD_BACKUP_DIR / stem
+    sections_dir.mkdir(parents=True, exist_ok=True)
+
+    for sec in doc.sections:
+        fname = _section_filename(doc.law_type, sec.number)
+        out_path = sections_dir / fname
+        out_path.write_text(_build_section_md(doc, sec), encoding="utf-8")
+
+    logger.info(f"Section files saved: {sections_dir} ({len(doc.sections)} files)")
+    return sections_dir
+
+
 # ── Cache ──────────────────────────────────────────────────────────────────────
 
 def _cache_path(file_id: str) -> Path:
@@ -613,8 +739,9 @@ def extract_law(
         "total_sections": len(sections),
     })
 
-    # Save MD backup
+    # Save MD backup (full) + per-section files
     md_path = _save_md_backup(doc)
     logger.debug(f"Law MD backup saved: {md_path}")
+    _save_section_files(doc)
 
     return doc
