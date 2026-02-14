@@ -389,26 +389,23 @@ def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
 def _split_paragraphs(section_text: str) -> list[str]:
     """Split a section's text into วรรค (paragraphs).
 
-    Phase 1 — blank-line split:
-    - Skips the label line (มาตรา XX / ข้อ XX)
-    - Splits by blank/whitespace-only lines
-    - Merges list items (ก)(ข)(ค) or (๑)(๒)(๓) back into the preceding วรรค
-    - Detects trailing non-continuation content inside a list-item block and
-      splits it off as a new วรรค
-
-    Phase 2 — Gemini fallback:
-    - If phase 1 yields only 1 paragraph and the content is long (≥ _PARA_GEMINI_MIN_CHARS),
-      Gemini is asked to identify วรรค boundaries. This handles PDFs where page layout
-      yields no blank lines between paragraphs.
+    Strategy: Gemini first, blank-line split as fallback.
+    - Gemini handles all semantic boundary detection (วรรค, list merging, etc.)
+    - Blank-line split is used only when Gemini is unavailable or fails.
     """
     lines = section_text.strip().splitlines()
     # Drop the label line
     content_lines = lines[1:] if lines and _SECTION_START_RE.match(lines[0].strip()) else lines
-    content = "\n".join(content_lines)
+    # Strip page headers before any splitting
+    content = _strip_page_headers("\n".join(content_lines))
 
-    # Phase 1: blank-line split
+    # Gemini: always use for semantic paragraph splitting
+    gemini_result = _split_paragraphs_gemini(content)
+    if gemini_result:
+        return gemini_result
+
+    # Fallback: blank-line split (when Gemini unavailable or failed)
     raw_paras = re.split(r"\n(?:[ \t]*\n)+", content)
-
     paragraphs: list[str] = []
     for para in raw_paras:
         para = para.strip()
@@ -421,13 +418,6 @@ def _split_paragraphs(section_text: str) -> list[str]:
                 paragraphs.append(tail)
         else:
             paragraphs.append(para)
-
-    # Phase 2: Gemini fallback when blank-line split couldn't find boundaries
-    if len(paragraphs) == 1 and len(content.strip()) >= _PARA_GEMINI_MIN_CHARS:
-        gemini_result = _split_paragraphs_gemini(content)
-        if gemini_result:
-            logger.debug(f"Gemini split: 1 → {len(gemini_result)} วรรค")
-            return gemini_result
 
     return paragraphs
 
