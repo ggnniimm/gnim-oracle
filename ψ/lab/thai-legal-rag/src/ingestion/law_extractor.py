@@ -59,11 +59,12 @@ _SECTION_START_RE = re.compile(r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+",
 @dataclass
 class LawSection:
     """One มาตรา or ข้อ with its position in the hierarchy."""
-    number: str          # Arabic, e.g. "60" or "60/1"
-    label: str           # Original label, e.g. "มาตรา ๖๐" or "ข้อ ๑๗๐"
-    text: str            # Full text of this section
-    part: str = ""       # e.g. "ภาค ๓ การบริหารสัญญาและการตรวจรับพัสดุ"
-    chapter: str = ""    # e.g. "หมวด ๖ การบริหารสัญญา"
+    number: str                      # Arabic, e.g. "60" or "60/1"
+    label: str                       # Original label, e.g. "มาตรา ๖๐" or "ข้อ ๑๗๐"
+    text: str                        # Full text of this section
+    part: str = ""                   # e.g. "ภาค ๓ การบริหารสัญญาและการตรวจรับพัสดุ"
+    chapter: str = ""                # e.g. "หมวด ๖ การบริหารสัญญา"
+    paragraphs: list = field(default_factory=list)  # วรรค 1, 2, 3... (content only, no label)
 
 
 @dataclass
@@ -119,20 +120,30 @@ def _detect_law_meta(text: str, filename: str) -> tuple[str, str, str, str]:
     law_year_be = _to_arabic(year_m.group(1)) if year_m else ""
 
     # ── Step 3: full law name ──────────────────────────────────────────────
-    # Look for full name starting with law_type keyword (skip very short matches)
+    # Law title may span multiple lines, e.g.:
+    #   พระราชบัญญัติ\nการจัดซื้อจัดจ้างและการบริหารพัสดุภาครัฐ\nพ.ศ. ๒๕๖๐
+    # Strategy: find law_type keyword, then collect lines until พ.ศ. line (inclusive)
     head = text[:3000]
-    # Collect all matches, pick the longest one that includes year
-    candidates = re.findall(
-        rf"({law_type}[^\n\r{{}}]+(?:พ\.ศ\.\s*[๐-๙\d]+)?)",
-        head,
-    )
-    if candidates:
-        # Prefer the FIRST candidate that includes พ.ศ. (= title line, not body)
-        with_year = [c for c in candidates if "พ.ศ." in c]
-        law_name = (with_year[0] if with_year else candidates[0]).strip()
-        # Remove trailing artifacts
-        law_name = re.sub(r"\s+", " ", law_name).strip()
-    else:
+    law_name = ""
+    lines_head = head.splitlines()
+    for i, line in enumerate(lines_head):
+        if law_type in line.strip():
+            # Collect this line + next lines until we hit พ.ศ. or blank / มาตรา
+            parts = [line.strip()]
+            for j in range(i + 1, min(i + 5, len(lines_head))):
+                next_line = lines_head[j].strip()
+                if not next_line:
+                    break
+                parts.append(next_line)
+                if "พ.ศ." in next_line:
+                    break
+                if re.match(r"^(มาตรา|ข้อ|หมวด|ภาค)", next_line):
+                    parts.pop()
+                    break
+            law_name = " ".join(parts)
+            law_name = re.sub(r"\s+", " ", law_name).strip()
+            break
+    if not law_name:
         law_name = Path(filename).stem.replace("+", " ").replace("-", " ").strip()
 
     # ── Step 4: short name — derive from filename keywords (most reliable) ──
@@ -233,6 +244,139 @@ Output raw text เท่านั้น ไม่ต้องมี markdown fo
             pass
 
 
+# ── Text cleaner ───────────────────────────────────────────────────────────────
+
+def _strip_page_headers(text: str) -> str:
+    """Remove ราชกิจจานุเบกษา page stamps interspersed in law text.
+
+    Pattern (4 lines):
+        หน้า   ๑๔
+        เล่ม   ๑๓๔   ตอนที่   ๒๔   ก
+        ราชกิจจานุเบกษา
+        ๒๔   กุมภาพันธ์   ๒๕๖๐
+    """
+    text = re.sub(
+        r"หน้า[ \t]+[๐-๙\d]+[^\n]*\n[^\n]*เล่ม[^\n]*\n[^\n]*ราชกิจจานุเบกษา[^\n]*\n[^\n]*\n?",
+        "\n",
+        text,
+    )
+    # Collapse runs of blank/whitespace-only lines left by stripping
+    text = re.sub(r"\n[ \t]*\n[ \t]*\n", "\n\n", text)
+    return text
+
+
+# ── Text normalizer ────────────────────────────────────────────────────────────
+
+def _normalize_section_headers(text: str) -> str:
+    """Join มาตรา/ข้อ with number when the number appears on the next line.
+
+    Some PDFs (e.g. single-digit มาตรา 1-9) format as:
+        มาตรา \n๑ \n...
+    while later sections use:
+        มาตรา ๑๐ ...
+    This normalises both to the same inline format before section parsing.
+    """
+    return re.sub(
+        r"^((?:มาตรา|ข้อ))\s*\n[ \t]*([๐-๙\d]+(?:/[๐-๙\d]+)?)",
+        r"\1 \2",
+        text,
+        flags=re.MULTILINE,
+    )
+
+
+# ── Paragraph splitter ─────────────────────────────────────────────────────────
+
+_LIST_ITEM_RE = re.compile(r"^\([ก-ฮ๐-๙\d]+\)")
+
+# Definite new-paragraph starters: Thai legal subjects/authorities that virtually
+# never appear as word-wrap continuation of a list item — only as sentence openers.
+# When one of these appears inside a list-item block (no blank line), it signals
+# the start of a closing legal paragraph (new วรรค).
+_DEFINITE_SUBJECT_RE = re.compile(
+    r"^(รัฐมนตรี|คณะกรรมการ|คณะรัฐมนตรี|ประธาน|ผู้ว่าราชการ|อธิบดี|นายก|ปลัด"
+    r"|หัวหน้า|ผู้อํานวยการ|ผู้อำนวยการ|กรมการ|ผู้บัญชาการ)",
+    re.UNICODE,
+)
+
+
+def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
+    """Given a para that starts with a list marker, split into (list_part, tail_varak).
+
+    The list_part gets merged into prev_varak.
+    tail_varak is the trailing content that starts a new legal paragraph (if any).
+
+    Thai law PDFs sometimes attach the closing วรรค of a section directly to the
+    last list item without a blank line, e.g.:
+        (ซ) กรณีอื่นตามที่กำหนดในกฎกระทรวง
+        รัฐมนตรีอาจออกกฎกระทรวง...    ← new วรรค, but no blank line!
+
+    We detect this only when a line starts with a known Thai legal authority/subject
+    (_DEFINITE_SUBJECT_RE) — words that virtually never appear as word-wrap
+    continuation of a list item. This avoids false positives from word-wrapped lines
+    like `การคัดเลือก` or `จำหน่าย  ก่อสร้าง`.
+    """
+    para_lines = para.splitlines()
+    list_lines: list[str] = []
+    tail_lines: list[str] = []
+    after_list = False
+
+    for pline in para_lines:
+        stripped = pline.strip()
+        if not stripped:
+            continue
+        if after_list:
+            tail_lines.append(pline)
+        elif _LIST_ITEM_RE.match(stripped):
+            # Another list marker — stays in list part
+            list_lines.append(pline)
+        elif _DEFINITE_SUBJECT_RE.match(stripped):
+            # A definite new-paragraph subject — this is the start of a new วรรค
+            after_list = True
+            tail_lines.append(pline)
+        else:
+            # Word-wrap continuation of the current list item
+            list_lines.append(pline)
+
+    list_part = prev_varak + "\n" + "\n".join(list_lines) if list_lines else prev_varak
+    tail_varak = "\n".join(tail_lines).strip() if tail_lines else None
+    return list_part, tail_varak
+
+
+def _split_paragraphs(section_text: str) -> list[str]:
+    """Split a section's text into วรรค (paragraphs).
+
+    Rules:
+    - Skips the label line (มาตรา XX / ข้อ XX)
+    - Splits by blank/whitespace-only lines
+    - Merges list items (ก)(ข)(ค) or (๑)(๒)(๓) back into the preceding วรรค
+    - Detects trailing non-continuation content inside a list-item block and
+      splits it off as a new วรรค (handles the case where the closing paragraph
+      is attached to the last list item with no blank line)
+    """
+    lines = section_text.strip().splitlines()
+    # Drop the label line
+    content_lines = lines[1:] if lines and _SECTION_START_RE.match(lines[0].strip()) else lines
+    # Split by blank/whitespace-only lines
+    content = "\n".join(content_lines)
+    raw_paras = re.split(r"\n(?:[ \t]*\n)+", content)
+
+    paragraphs: list[str] = []
+    for para in raw_paras:
+        para = para.strip()
+        if not para:
+            continue
+        if paragraphs and _LIST_ITEM_RE.match(para):
+            # Merge list item into previous วรรค, but detect trailing new-paragraph content
+            merged, tail = _split_list_para(para, paragraphs[-1])
+            paragraphs[-1] = merged
+            if tail:
+                paragraphs.append(tail)
+        else:
+            paragraphs.append(para)
+
+    return paragraphs
+
+
 # ── Section parser ─────────────────────────────────────────────────────────────
 
 def _parse_sections(text: str) -> list[LawSection]:
@@ -295,6 +439,7 @@ def _parse_sections(text: str) -> list[LawSection]:
             text=section_text,
             part=part,
             chapter=chapter,
+            paragraphs=_split_paragraphs(section_text),
         ))
 
     return sections
@@ -337,7 +482,15 @@ def _build_md_text(doc: LawDocument) -> str:
             current_chapter = sec.chapter
             if current_chapter:
                 lines += ["", f"### {current_chapter}", ""]
-        lines += ["", sec.text, ""]
+
+        # Prepend context so each embedded chunk knows which law/chapter it belongs to
+        ctx_parts = [doc.law_short_name]
+        if sec.part:
+            ctx_parts.append(sec.part)
+        if sec.chapter:
+            ctx_parts.append(sec.chapter)
+        context_line = "[" + " | ".join(ctx_parts) + "]"
+        lines += ["", context_line, sec.text, ""]
 
     return "\n".join(lines)
 
@@ -419,6 +572,12 @@ def extract_law(
     law_name, law_short_name, law_type, law_year_be = _detect_law_meta(text, filename)
     logger.info(f"Detected: {law_type} '{law_short_name}' {law_year_be}")
 
+    # Strip ราชกิจจาฯ page stamps before parsing
+    text = _strip_page_headers(text)
+
+    # Normalize section headers before parsing
+    text = _normalize_section_headers(text)
+
     # Parse sections
     sections = _parse_sections(text)
     logger.info(f"Parsed {len(sections)} sections from '{filename}'")
@@ -446,7 +605,7 @@ def extract_law(
         "law_year_be": doc.law_year_be,
         "sections": [
             {"number": s.number, "label": s.label, "text": s.text,
-             "part": s.part, "chapter": s.chapter}
+             "part": s.part, "chapter": s.chapter, "paragraphs": s.paragraphs}
             for s in sections
         ],
         "full_text": text,
