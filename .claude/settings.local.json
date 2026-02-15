@@ -40,7 +40,10 @@
       "Bash(pip install:*)",
       "Bash(python3:*)",
       "Bash(gdown:*)",
-      "Bash(pgrep:*)"
+      "Bash(pgrep:*)",
+      "Bash(find:*)",
+      "WebFetch(domain:www.youtube.com)",
+      "Bash(oracle-skills:*)"
     ]
   }
 }
