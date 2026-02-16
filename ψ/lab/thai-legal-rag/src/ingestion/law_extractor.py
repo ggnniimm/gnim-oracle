@@ -65,6 +65,7 @@ class LawSection:
     part: str = ""                   # e.g. "ภาค ๓ การบริหารสัญญาและการตรวจรับพัสดุ"
     chapter: str = ""                # e.g. "หมวด ๖ การบริหารสัญญา"
     paragraphs: list = field(default_factory=list)  # วรรค 1, 2, 3... (content only, no label)
+    references: list = field(default_factory=list)  # cross-section refs
 
 
 @dataclass
@@ -318,11 +319,17 @@ def _split_paragraphs_gemini(content: str) -> list[str] | None:
 
         client = genai.Client(api_key=GEMINI_API_KEYS[0])
         prompt = (
-            "แบ่งข้อความกฎหมายไทยต่อไปนี้เป็นวรรค (paragraph) ตามความหมายทางกฎหมาย\n"
-            "กฎ:\n"
-            "- list items เช่น (ก)(ข)(ค) หรือ (๑)(๒)(๓) ให้รวมไว้ในวรรคก่อนหน้า\n"
-            "- ตอบเป็น JSON array of strings เท่านั้น ห้ามมี markdown หรือคำอธิบายเพิ่ม\n"
-            "- แต่ละ element คือข้อความ 1 วรรค ไม่ต้องใส่เลขวรรค\n\n"
+            "แบ่งข้อความกฎหมายไทยต่อไปนี้เป็นวรรค (paragraph) ตามโครงสร้างราชกิจจานุเบกษา\n\n"
+            "กฎการรวม (ห้ามแยก — สำคัญมาก):\n"
+            "- อนุมาตรา (๑)(๒)(๓) และ sub-items (ก)(ข)(ค) ทุกระดับ เป็นส่วนหนึ่งของวรรคที่นำมา ห้ามแยกเป็นวรรคใหม่\n"
+            "- \"เว้นแต่\" + อนุมาตราทั้งหมดที่ตามมา ((๑)...(ก)-(ซ) และ (๒)...(ก)-(ซ)) = วรรคเดียวกับประโยคหลัก\n"
+            "- ตัวอย่าง: \"ให้ใช้วิธี...ก่อน เว้นแต่ (๑)...(ก)...(ซ) (๒)...(ก)...(ซ)\" = ทั้งหมดเป็นวรรคเดียว\n\n"
+            "กฎการแยก (ต้องแยกเป็นวรรคใหม่):\n"
+            "- เฉพาะประโยคอิสระที่ไม่ใช่อนุมาตราหรือ sub-item เท่านั้น\n"
+            "- ประโยคที่ขึ้นต้นด้วย \"รัฐมนตรี\", \"ในกรณี\", \"ให้หน่วยงาน\", \"การยกเว้น\", \"กรณีตาม\" = วรรคใหม่\n\n"
+            "รูปแบบคำตอบ:\n"
+            "- JSON array of strings เท่านั้น ห้ามมี markdown หรือคำอธิบาย\n"
+            "- แต่ละ element = 1 วรรค ไม่ต้องใส่เลขวรรค\n\n"
             f"ข้อความ:\n{content}"
         )
         response = client.models.generate_content(
@@ -422,6 +429,58 @@ def _split_paragraphs(section_text: str) -> list[str]:
     return paragraphs
 
 
+# ── Cross-reference extraction ─────────────────────────────────────────────────
+
+_XREF_RE = re.compile(r"(?:มาตรา|ข้อ)\s+([๐-๙\d]+(?:/[๐-๙\d]+)?)")
+
+def _extract_references(section_text: str, own_number: str) -> list[dict]:
+    """Extract cross-section references from section text.
+
+    Returns list of {"type": str, "section": str, "text": str}
+    where type is one of: subordinate_to, mutatis_mutandis, references.
+    """
+    results: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+
+    for m in _XREF_RE.finditer(section_text):
+        raw_num = m.group(1)
+        section_num = _to_arabic(raw_num)
+
+        # Skip self-references
+        if section_num == own_number:
+            continue
+
+        # Look at surrounding text for classification
+        # Check ~30 chars before the match start
+        start = max(0, m.start() - 30)
+        preceding = section_text[start:m.start()]
+        # Check ~30 chars after the match end
+        following = section_text[m.end():m.end() + 30]
+
+        if "ภายใต้บังคับ" in preceding:
+            ref_type = "subordinate_to"
+        elif "โดยอนุโลม" in preceding or "โดยอนุโลม" in following:
+            ref_type = "mutatis_mutandis"
+        else:
+            ref_type = "references"
+
+        # Skip internal paragraph refs (วรรคหนึ่ง, วรรคสอง, etc.)
+        # These are caught by the regex if embedded like "มาตรา ๕๖ วรรคหนึ่ง"
+        # but we still want the section ref itself — only skip if it's own number
+
+        key = (ref_type, section_num)
+        if key not in seen:
+            seen.add(key)
+            matched_text = section_text[m.start():m.end()]
+            results.append({
+                "type": ref_type,
+                "section": section_num,
+                "text": matched_text,
+            })
+
+    return results
+
+
 # ── Section parser ─────────────────────────────────────────────────────────────
 
 def _parse_sections(text: str) -> list[LawSection]:
@@ -485,6 +544,7 @@ def _parse_sections(text: str) -> list[LawSection]:
             part=part,
             chapter=chapter,
             paragraphs=_split_paragraphs(section_text),
+            references=_extract_references(section_text, number),
         ))
 
     return sections
@@ -590,6 +650,16 @@ def _build_section_md(doc: LawDocument, sec: LawSection) -> str:
         f'chapter: "{_esc(sec.chapter)}"',
         f'section: "{sec.number}"',
         f"total_paragraphs: {len(sec.paragraphs)}",
+    ]
+
+    # Add references to frontmatter
+    if sec.references:
+        lines.append("references:")
+        for ref in sec.references:
+            lines.append(f'  - type: {ref["type"]}')
+            lines.append(f'    section: "{ref["section"]}"')
+
+    lines += [
         f'file_id: "{doc.file_id}"',
         f'file_url: "https://drive.google.com/file/d/{doc.file_id}/view"',
         f'status: "active"',
@@ -598,6 +668,22 @@ def _build_section_md(doc: LawDocument, sec: LawSection) -> str:
         context_header,
         "",
     ]
+
+    # Reference block (before วรรค content)
+    if sec.references:
+        # Group by type
+        by_type: dict[str, list[str]] = {}
+        for ref in sec.references:
+            by_type.setdefault(ref["type"], []).append(ref["text"])
+        type_labels = {
+            "subordinate_to": "ภายใต้บังคับ",
+            "mutatis_mutandis": "โดยอนุโลม",
+            "references": "อ้างอิง",
+        }
+        for rtype, label in type_labels.items():
+            if rtype in by_type:
+                lines.append(f"> **{label}**: {', '.join(by_type[rtype])}")
+        lines.append("")
 
     # Hybrid วรรค display: show per-paragraph headings when >1 วรรค
     if len(sec.paragraphs) > 1:
@@ -663,7 +749,10 @@ def extract_law(
         cached = _load_cache(file_id)
         if cached is not None:
             logger.debug(f"Law cache hit: {file_id}")
-            sections = [LawSection(**s) for s in cached["sections"]]
+            sections = []
+            for s in cached["sections"]:
+                s.setdefault("references", [])
+                sections.append(LawSection(**s))
             return LawDocument(
                 filename=cached["filename"],
                 file_id=cached["file_id"],
@@ -729,7 +818,8 @@ def extract_law(
         "law_year_be": doc.law_year_be,
         "sections": [
             {"number": s.number, "label": s.label, "text": s.text,
-             "part": s.part, "chapter": s.chapter, "paragraphs": s.paragraphs}
+             "part": s.part, "chapter": s.chapter, "paragraphs": s.paragraphs,
+             "references": s.references}
             for s in sections
         ],
         "full_text": text,

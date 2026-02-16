@@ -7,6 +7,8 @@ Uses cached JSON (no re-OCR, no API calls) to write
 Usage:
     python pipeline/regenerate_sections.py            # all cached laws
     python pipeline/regenerate_sections.py --dry-run  # list only, no write
+    python pipeline/regenerate_sections.py --resplit   # re-run Gemini วรรค splitting + update cache
+    python pipeline/regenerate_sections.py --re-ref    # re-extract cross-references + update cache
 """
 from __future__ import annotations
 
@@ -22,13 +24,18 @@ from src.config import OCR_CACHE_DIR
 from src.ingestion.law_extractor import (
     LawDocument,
     LawSection,
+    _extract_references,
     _save_section_files,
+    _split_paragraphs,
 )
 
 
 def _load_doc_from_cache(cache_file: Path) -> LawDocument:
     data = json.loads(cache_file.read_text(encoding="utf-8"))
-    sections = [LawSection(**s) for s in data["sections"]]
+    sections = []
+    for s in data["sections"]:
+        s.setdefault("references", [])
+        sections.append(LawSection(**s))
     return LawDocument(
         filename=data["filename"],
         file_id=data["file_id"],
@@ -43,9 +50,53 @@ def _load_doc_from_cache(cache_file: Path) -> LawDocument:
     )
 
 
+def _resplit_and_update_cache(cache_file: Path, doc: LawDocument) -> int:
+    """Re-run _split_paragraphs on all sections and update the cache JSON.
+
+    Returns number of sections whose paragraph count changed.
+    """
+    changed = 0
+    for sec in doc.sections:
+        old_count = len(sec.paragraphs)
+        sec.paragraphs = _split_paragraphs(sec.text)
+        if len(sec.paragraphs) != old_count:
+            changed += 1
+
+    # Write back to cache
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
+    for i, sec in enumerate(doc.sections):
+        data["sections"][i]["paragraphs"] = sec.paragraphs
+    cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return changed
+
+
+def _reref_and_update_cache(cache_file: Path, doc: LawDocument) -> int:
+    """Re-extract cross-references on all sections and update the cache JSON.
+
+    Returns number of sections whose references changed.
+    """
+    changed = 0
+    for sec in doc.sections:
+        old_refs = sec.references
+        sec.references = _extract_references(sec.text, sec.number)
+        if sec.references != old_refs:
+            changed += 1
+
+    # Write back to cache
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
+    for i, sec in enumerate(doc.sections):
+        data["sections"][i]["references"] = sec.references
+    cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return changed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Regenerate per-section MD files from cache")
     parser.add_argument("--dry-run", action="store_true", help="List files only, no write")
+    parser.add_argument("--resplit", action="store_true",
+                        help="Re-run Gemini วรรค splitting and update cache JSON")
+    parser.add_argument("--re-ref", action="store_true",
+                        help="Re-extract cross-references and update cache JSON")
     args = parser.parse_args()
 
     cache_files = sorted(OCR_CACHE_DIR.glob("law_*.json"))
@@ -59,6 +110,15 @@ def main() -> None:
         doc = _load_doc_from_cache(cf)
         section_count = len(doc.sections)
         print(f"  {doc.law_short_name or doc.law_name}  ({section_count} sections)")
+
+        if args.resplit and not args.dry_run:
+            changed = _resplit_and_update_cache(cf, doc)
+            print(f"    resplit: {changed} sections changed paragraph count")
+
+        if args.re_ref and not args.dry_run:
+            changed = _reref_and_update_cache(cf, doc)
+            print(f"    re-ref: {changed} sections changed references")
+
         if not args.dry_run:
             out_dir = _save_section_files(doc)
             print(f"    → {out_dir}")

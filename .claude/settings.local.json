@@ -43,7 +43,8 @@
       "Bash(pgrep:*)",
       "Bash(find:*)",
       "WebFetch(domain:www.youtube.com)",
-      "Bash(oracle-skills:*)"
+      "Bash(oracle-skills:*)",
+      "Bash(python:*)"
     ]
   }
 }
