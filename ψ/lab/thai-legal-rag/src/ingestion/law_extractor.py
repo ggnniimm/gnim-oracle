@@ -597,9 +597,17 @@ def _build_section_md(doc: LawDocument, sec: LawSection) -> str:
         "",
         context_header,
         "",
-        section_text,
-        "",
     ]
+
+    # Hybrid วรรค display: show per-paragraph headings when >1 วรรค
+    if len(sec.paragraphs) > 1:
+        for i, para in enumerate(sec.paragraphs, 1):
+            lines.append(f"### วรรค {i}")
+            lines.append(_strip_page_headers(para))
+            lines.append("")
+    else:
+        lines.append(section_text)
+        lines.append("")
     return "\n".join(lines)
 
 
