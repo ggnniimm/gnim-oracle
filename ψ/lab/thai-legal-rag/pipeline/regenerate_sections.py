@@ -9,6 +9,7 @@ Usage:
     python pipeline/regenerate_sections.py --dry-run  # list only, no write
     python pipeline/regenerate_sections.py --resplit   # re-run Gemini วรรค splitting + update cache
     python pipeline/regenerate_sections.py --re-ref    # re-extract cross-references + update cache
+    python pipeline/regenerate_sections.py --cleanup   # trim structural headers from section text + resplit + update cache
 """
 from __future__ import annotations
 
@@ -27,6 +28,7 @@ from src.ingestion.law_extractor import (
     _extract_references,
     _save_section_files,
     _split_paragraphs,
+    _trim_trailing_structure,
 )
 
 
@@ -90,6 +92,29 @@ def _reref_and_update_cache(cache_file: Path, doc: LawDocument) -> int:
     return changed
 
 
+def _cleanup_and_update_cache(cache_file: Path, doc: LawDocument) -> int:
+    """Trim trailing structural headers from section text, re-split paragraphs, update cache.
+
+    Returns number of sections whose text was modified.
+    """
+    changed = 0
+    for sec in doc.sections:
+        cleaned = _trim_trailing_structure(sec.text)
+        if cleaned != sec.text:
+            sec.text = cleaned
+            changed += 1
+        # Always re-split paragraphs on cleaned text
+        sec.paragraphs = _split_paragraphs(sec.text)
+
+    # Write back to cache
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
+    for i, sec in enumerate(doc.sections):
+        data["sections"][i]["text"] = sec.text
+        data["sections"][i]["paragraphs"] = sec.paragraphs
+    cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return changed
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Regenerate per-section MD files from cache")
     parser.add_argument("--dry-run", action="store_true", help="List files only, no write")
@@ -97,6 +122,8 @@ def main() -> None:
                         help="Re-run Gemini วรรค splitting and update cache JSON")
     parser.add_argument("--re-ref", action="store_true",
                         help="Re-extract cross-references and update cache JSON")
+    parser.add_argument("--cleanup", action="store_true",
+                        help="Trim trailing structural headers from section text, resplit, update cache")
     args = parser.parse_args()
 
     cache_files = sorted(OCR_CACHE_DIR.glob("law_*.json"))
@@ -110,6 +137,10 @@ def main() -> None:
         doc = _load_doc_from_cache(cf)
         section_count = len(doc.sections)
         print(f"  {doc.law_short_name or doc.law_name}  ({section_count} sections)")
+
+        if args.cleanup and not args.dry_run:
+            changed = _cleanup_and_update_cache(cf, doc)
+            print(f"    cleanup: {changed} sections trimmed + resplit")
 
         if args.resplit and not args.dry_run:
             changed = _resplit_and_update_cache(cf, doc)

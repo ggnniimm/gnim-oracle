@@ -481,6 +481,81 @@ def _extract_references(section_text: str, own_number: str) -> list[dict]:
     return results
 
 
+# ── Trailing structure trimmer ─────────────────────────────────────────────────
+
+# Structural header that is ALWAYS a section/part divider (never inline content)
+_STRUCT_PART_RE = re.compile(r"^ส่วนที่\s+[๐-๙\d]+\s*$")
+_STRUCT_PHAK_RE = re.compile(r"^ภาค(?:\s*ที่)?\s+[๐-๙\d]+\s*$")
+# หมวด is structural ONLY when standalone (no continuation text after the title)
+_STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\s*$")
+
+# Legal content markers — lines containing these are real legal text, not titles
+_LEGAL_CONTENT_MARKERS = re.compile(
+    r"(มาตรา|ข้อ|วรรค|พ\.ร\.บ\.|พระราชบัญญัติ|ระเบียบ|ให้|ต้อง|ห้าม|กรณี|ตาม|แห่ง)"
+)
+
+
+def _trim_trailing_structure(section_text: str) -> str:
+    """Strip trailing structural headers (ส่วนที่, หมวด, ภาค) from section text.
+
+    These headers belong to the next chapter/part, not to the current section.
+    They get captured because _parse_sections() takes all lines between two
+    section markers (มาตรา/ข้อ), which may include structural headers that
+    appear between the end of one section's content and the start of the next.
+
+    Critical: Does NOT strip หมวด when it's an inline reference
+    (e.g. "หมวด ๓ หรือหมวด ๔ แล้วแต่กรณี").
+    """
+    lines = section_text.splitlines()
+
+    # Scan from bottom: collect a candidate trim block.
+    # The block may contain structural headers + title lines + blanks.
+    # We only trim if the block contains at least one structural header.
+    # Once we find a structural header, we stop scanning upward when we
+    # hit a line with legal content (to avoid eating real section text).
+    found_structural = False
+    trim_from = len(lines)
+    i = len(lines) - 1
+    while i >= 1:  # never trim the first line (section label)
+        stripped = lines[i].strip()
+
+        # Skip blank lines
+        if not stripped:
+            i -= 1
+            continue
+
+        # Structural header — confirms this block should be trimmed
+        if (_STRUCT_PART_RE.match(stripped)
+                or _STRUCT_CHAPTER_RE.match(stripped)
+                or _STRUCT_PHAK_RE.match(stripped)):
+            found_structural = True
+            trim_from = i
+            i -= 1
+            continue
+
+        # If we already found a structural header, stop at any content line
+        # (don't eat real section text above the structural header)
+        if found_structural:
+            break
+
+        # Non-legal line below structural header — likely a title/subtitle
+        if not _LEGAL_CONTENT_MARKERS.search(stripped):
+            trim_from = i
+            i -= 1
+            continue
+
+        # Legal content line — stop scanning
+        break
+
+    if found_structural and trim_from < len(lines):
+        # Also trim trailing blank lines before the structural block
+        while trim_from > 1 and not lines[trim_from - 1].strip():
+            trim_from -= 1
+        return "\n".join(lines[:trim_from]).strip()
+
+    return section_text
+
+
 # ── Section parser ─────────────────────────────────────────────────────────────
 
 def _parse_sections(text: str) -> list[LawSection]:
@@ -520,6 +595,7 @@ def _parse_sections(text: str) -> list[LawSection]:
 
         section_lines = lines[line_idx:end_idx]
         section_text = "\n".join(section_lines).strip()
+        section_text = _trim_trailing_structure(section_text)
 
         # Determine which part/chapter this section belongs to
         # (last part/chapter marker before this line_idx)
