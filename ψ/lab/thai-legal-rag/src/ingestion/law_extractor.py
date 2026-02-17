@@ -343,7 +343,7 @@ def _split_paragraphs_gemini(content: str) -> list[str] | None:
         parsed = json.loads(raw)
         if isinstance(parsed, list) and all(isinstance(p, str) for p in parsed):
             result = [p.strip() for p in parsed if p.strip()]
-            if len(result) > 1:
+            if len(result) >= 1:
                 return result
     except Exception as e:
         logger.debug(f"Gemini paragraph split failed: {e}")
@@ -393,6 +393,46 @@ def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
     return list_part, tail_varak
 
 
+_CONTINUATION_RE = re.compile(
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|เพื่อ)"
+)
+
+
+def _post_merge_paragraphs(paragraphs: list[str]) -> list[str]:
+    """Post-process วรรค list: merge list items and orphan fragments back.
+
+    Pass 1 — List items: paragraphs starting with (ก)-(ฮ) or (๑)-(๙) markers
+    get merged into the preceding paragraph (they're sub-items, not new วรรค).
+
+    Pass 2 — Orphan continuations: paragraphs starting with continuation words
+    (ตาม, แต่, และ, etc.) that aren't independent sentences get merged back.
+    """
+    if len(paragraphs) <= 1:
+        return paragraphs
+
+    # Pass 1: merge list items back into parent
+    merged: list[str] = [paragraphs[0]]
+    for para in paragraphs[1:]:
+        stripped = para.strip()
+        if stripped and _LIST_ITEM_RE.match(stripped):
+            # This is a list sub-item — merge into previous paragraph
+            merged[-1] = merged[-1] + "\n" + para
+        else:
+            merged.append(para)
+
+    # Pass 2: merge orphan continuation fragments
+    result: list[str] = [merged[0]]
+    for para in merged[1:]:
+        stripped = para.strip()
+        if stripped and _CONTINUATION_RE.match(stripped):
+            # Continuation word at start — merge into previous paragraph
+            result[-1] = result[-1] + "\n" + para
+        else:
+            result.append(para)
+
+    return result
+
+
 def _split_paragraphs(section_text: str) -> list[str]:
     """Split a section's text into วรรค (paragraphs).
 
@@ -406,10 +446,13 @@ def _split_paragraphs(section_text: str) -> list[str]:
     # Strip page headers before any splitting
     content = _strip_page_headers("\n".join(content_lines))
 
+    # Collapse triple+ newlines (artifacts from page header stripping) before Gemini
+    content = re.sub(r"\n{3,}", "\n\n", content)
+
     # Gemini: always use for semantic paragraph splitting
     gemini_result = _split_paragraphs_gemini(content)
     if gemini_result:
-        return gemini_result
+        return _post_merge_paragraphs(gemini_result)
 
     # Fallback: blank-line split (when Gemini unavailable or failed)
     raw_paras = re.split(r"\n(?:[ \t]*\n)+", content)
@@ -426,7 +469,7 @@ def _split_paragraphs(section_text: str) -> list[str]:
         else:
             paragraphs.append(para)
 
-    return paragraphs
+    return _post_merge_paragraphs(paragraphs)
 
 
 # ── Cross-reference extraction ─────────────────────────────────────────────────
