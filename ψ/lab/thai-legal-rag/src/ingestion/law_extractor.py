@@ -291,6 +291,8 @@ def _normalize_section_headers(text: str) -> str:
 _PARA_GEMINI_MIN_CHARS = 300
 
 _LIST_ITEM_RE = re.compile(r"^\([ก-ฮ๐-๙\d]+\)")
+# Detect list markers embedded anywhere in text (for already-merged paragraphs)
+_EMBEDDED_LIST_RE = re.compile(r"\([ก-ฮ๐-๙\d]+\)")
 
 # Definite new-paragraph starters: Thai legal subjects/authorities that virtually
 # never appear as word-wrap continuation of a list item — only as sentence openers.
@@ -397,12 +399,34 @@ _CONTINUATION_RE = re.compile(
     r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|เพื่อ)"
 )
 
+# Broader continuation patterns valid only inside list-context blocks.
+# These phrases commonly appear as qualifiers/conditions within sub-items
+# (e.g. "ทั้งนี้ การซื้อ...", "ในกรณีที่ผู้ยื่น...") but NOT as new วรรค openers.
+_LIST_CONTEXT_CONTINUATION_RE = re.compile(
+    r"^(ทั้งนี้|ในกรณี|ในการ|ในกระบวนการ"
+    r"|ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|เพื่อ)"
+)
+
+
+def _has_list_markers_ahead(paragraphs: list[str], from_idx: int) -> bool:
+    """Check if any paragraph from from_idx onward has list markers."""
+    for p in paragraphs[from_idx:]:
+        s = p.strip()
+        if s and (_LIST_ITEM_RE.match(s) or _EMBEDDED_LIST_RE.search(s)):
+            return True
+    return False
+
 
 def _post_merge_paragraphs(paragraphs: list[str]) -> list[str]:
     """Post-process วรรค list: merge list items and orphan fragments back.
 
-    Pass 1 — List items: paragraphs starting with (ก)-(ฮ) or (๑)-(๙) markers
-    get merged into the preceding paragraph (they're sub-items, not new วรรค).
+    Pass 1 — List-context merging with look-ahead:
+    Once a list-item marker is seen (standalone or embedded), enter list context.
+    While in list context, use look-ahead to decide merging:
+      - If subsequent paragraphs still contain list markers → merge (between items)
+      - If no markers ahead but paragraph starts with continuation pattern → merge
+      - If no markers ahead and not continuation → exit list context (new วรรค)
+    Always exit on _DEFINITE_SUBJECT_RE regardless.
 
     Pass 2 — Orphan continuations: paragraphs starting with continuation words
     (ตาม, แต่, และ, etc.) that aren't independent sentences get merged back.
@@ -410,15 +434,40 @@ def _post_merge_paragraphs(paragraphs: list[str]) -> list[str]:
     if len(paragraphs) <= 1:
         return paragraphs
 
-    # Pass 1: merge list items back into parent
+    # Pass 1: merge list items and their continuation text into parent
     merged: list[str] = [paragraphs[0]]
-    for para in paragraphs[1:]:
+    in_list_context = bool(_EMBEDDED_LIST_RE.search(paragraphs[0]))
+    for idx, para in enumerate(paragraphs[1:], 1):
         stripped = para.strip()
-        if stripped and _LIST_ITEM_RE.match(stripped):
-            # This is a list sub-item — merge into previous paragraph
+        if not stripped:
+            continue
+        if _LIST_ITEM_RE.match(stripped):
+            # Standalone list marker — merge and enter/stay in list context
             merged[-1] = merged[-1] + "\n" + para
+            in_list_context = True
+        elif in_list_context:
+            if _DEFINITE_SUBJECT_RE.match(stripped):
+                # Definite new วรรค — always exit
+                in_list_context = False
+                merged.append(para)
+            elif _EMBEDDED_LIST_RE.search(stripped):
+                # Current paragraph itself has list markers → still in block
+                merged[-1] = merged[-1] + "\n" + para
+            elif _has_list_markers_ahead(paragraphs, idx + 1):
+                # More list items coming → between items → merge
+                merged[-1] = merged[-1] + "\n" + para
+            elif _LIST_CONTEXT_CONTINUATION_RE.match(stripped):
+                # No more markers, but continuation/qualifier pattern → merge
+                merged[-1] = merged[-1] + "\n" + para
+            else:
+                # No markers ahead, not continuation → list is done → new วรรค
+                in_list_context = False
+                merged.append(para)
         else:
             merged.append(para)
+            # Check if this paragraph has embedded list markers → enter context
+            if _EMBEDDED_LIST_RE.search(stripped):
+                in_list_context = True
 
     # Pass 2: merge orphan continuation fragments
     result: list[str] = [merged[0]]
@@ -455,6 +504,25 @@ def _split_paragraphs(section_text: str) -> list[str]:
         return _post_merge_paragraphs(gemini_result)
 
     # Fallback: blank-line split (when Gemini unavailable or failed)
+    # Pre-process: join single-newline lines that are mid-sentence (no sentence-
+    # ending punctuation, no section/list marker) to reduce false blank-line
+    # breaks caused by PDF formatting newlines.
+    joined_lines: list[str] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            # Preserve blank lines (they become split points)
+            joined_lines.append("")
+        elif (joined_lines
+              and joined_lines[-1]  # prev line is non-blank
+              and not _LIST_ITEM_RE.match(stripped)
+              and not _SECTION_START_RE.match(stripped)):
+            # Mid-sentence continuation — join to previous line
+            joined_lines[-1] = joined_lines[-1] + " " + stripped
+        else:
+            joined_lines.append(stripped)
+    content = "\n".join(joined_lines)
+
     raw_paras = re.split(r"\n(?:[ \t]*\n)+", content)
     paragraphs: list[str] = []
     for para in raw_paras:
