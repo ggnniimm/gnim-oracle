@@ -293,6 +293,13 @@ _PARA_GEMINI_MIN_CHARS = 300
 _LIST_ITEM_RE = re.compile(r"^\([ก-ฮ๐-๙\d]+\)")
 # Detect list markers embedded anywhere in text (for already-merged paragraphs)
 _EMBEDDED_LIST_RE = re.compile(r"\([ก-ฮ๐-๙\d]+\)")
+# Definition list items: "คำ" หมายความว่า / หมายถึง — treated as list items
+# Matches both ASCII quotes (") and Unicode curly quotes (\u201c\u201d).
+# Allows optional content between closing quote and หมายความว่า
+# (e.g. "(Electronic Catalog : e-catalog) หมายความว่า").
+_DEFINITION_ITEM_RE = re.compile(
+    r'^[\u201c"][^\u201d"]*[\u201d"].{0,60}?(หมายความว่า|หมายถึง|หมายรวมถึง)', re.UNICODE
+)
 
 # Definite new-paragraph starters: Thai legal subjects/authorities that virtually
 # never appear as word-wrap continuation of a list item — only as sentence openers.
@@ -409,10 +416,14 @@ _LIST_CONTEXT_CONTINUATION_RE = re.compile(
 
 
 def _has_list_markers_ahead(paragraphs: list[str], from_idx: int) -> bool:
-    """Check if any paragraph from from_idx onward has list markers."""
+    """Check if any paragraph from from_idx onward has list or definition markers."""
     for p in paragraphs[from_idx:]:
         s = p.strip()
-        if s and (_LIST_ITEM_RE.match(s) or _EMBEDDED_LIST_RE.search(s)):
+        if s and (
+            _LIST_ITEM_RE.match(s)
+            or _EMBEDDED_LIST_RE.search(s)
+            or _DEFINITION_ITEM_RE.match(s)
+        ):
             return True
     return False
 
@@ -421,12 +432,16 @@ def _post_merge_paragraphs(paragraphs: list[str]) -> list[str]:
     """Post-process วรรค list: merge list items and orphan fragments back.
 
     Pass 1 — List-context merging with look-ahead:
-    Once a list-item marker is seen (standalone or embedded), enter list context.
-    While in list context, use look-ahead to decide merging:
-      - If subsequent paragraphs still contain list markers → merge (between items)
+    Once a list-item marker is seen (standalone, embedded, or definition-list item),
+    enter list context. While in list context, use look-ahead to decide merging:
+      - If subsequent paragraphs still contain list/definition markers → merge
       - If no markers ahead but paragraph starts with continuation pattern → merge
       - If no markers ahead and not continuation → exit list context (new วรรค)
     Always exit on _DEFINITE_SUBJECT_RE regardless.
+
+    Definition list items ("คำ" หมายความว่า) are treated as list items — they
+    always merge into the preceding paragraph and enter list context. This handles
+    บทนิยาม sections (มาตรา/ข้อ 4) where each definition should be 1 วรรค total.
 
     Pass 2 — Orphan continuations: paragraphs starting with continuation words
     (ตาม, แต่, และ, etc.) that aren't independent sentences get merged back.
@@ -441,7 +456,11 @@ def _post_merge_paragraphs(paragraphs: list[str]) -> list[str]:
         stripped = para.strip()
         if not stripped:
             continue
-        if _LIST_ITEM_RE.match(stripped):
+        if _DEFINITION_ITEM_RE.match(stripped):
+            # Definition list item ("คำ" หมายความว่า) — always merge into previous
+            merged[-1] = merged[-1] + "\n" + para
+            in_list_context = True
+        elif _LIST_ITEM_RE.match(stripped):
             # Standalone list marker — merge and enter/stay in list context
             merged[-1] = merged[-1] + "\n" + para
             in_list_context = True

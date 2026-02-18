@@ -227,6 +227,46 @@ class TestPostMergeParagraphs:
         assert "การดําเนินการตามวรรคหนึ่ง" in result[1]
 
 
+    def test_definition_list_merges_into_one(self):
+        """Issue #4: "คำ" หมายความว่า items merge into parent (บทนิยาม section)."""
+        paras = [
+            "ในพระราชบัญญัตินี้",
+            '"การจัดซื้อจัดจ้าง" หมายความว่า การดําเนินการเพื่อให้ได้มาซึ่งพัสดุ',
+            '"พัสดุ" หมายความว่า สินค้า งานบริการ งานก่อสร้าง',
+            '"สินค้า" หมายความว่า วัสดุ ครุภัณฑ์ ที่ดิน สิ่งปลูกสร้าง',
+            '"รัฐมนตรี" หมายความว่า รัฐมนตรีผู้รักษาการตามพระราชบัญญัตินี้',
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 1
+        assert "การจัดซื้อจัดจ้าง" in result[0]
+        assert "รัฐมนตรี" in result[0]
+
+    def test_definition_list_starting_directly(self):
+        """Definition item as first non-intro paragraph enters list context immediately."""
+        paras = [
+            '"หัวหน้าหน่วยงานของรัฐ" หมายความว่า ผู้ดํารงตําแหน่งในหน่วยงานของรัฐ\n(๑) ราชการส่วนกลาง\n(๒) ราชการส่วนภูมิภาค',
+            '"หัวหน้าเจ้าหน้าที่" หมายความว่า ผู้ดํารงตําแหน่งหัวหน้าสายงาน',
+            '"ผู้มีผลประโยชน์ร่วมกัน" หมายความว่า บุคคลธรรมดาหรือนิติบุคคล',
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 1
+        assert "หัวหน้าเจ้าหน้าที่" in result[0]
+        assert "ผู้มีผลประโยชน์ร่วมกัน" in result[0]
+
+    def test_definition_list_look_ahead_merges_between_items(self):
+        """Definition items with continuation text between them all merge."""
+        paras = [
+            "ในระเบียบนี้",
+            '"ผู้มีผลประโยชน์ร่วมกัน" หมายความว่า บุคคลที่เข้าเสนอราคา',
+            "การมีส่วนได้เสียดังกล่าวข้างต้น ได้แก่ ความสัมพันธ์ดังต่อไปนี้",
+            '"การขัดขวางการแข่งขัน" หมายความว่า การกระทําอย่างใด',
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 1
+        assert "ผู้มีผลประโยชน์ร่วมกัน" in result[0]
+        assert "การขัดขวางการแข่งขัน" in result[0]
+
+
 # ── _split_list_para tests ──────────────────────────────────────────────────
 
 class TestSplitListPara:
