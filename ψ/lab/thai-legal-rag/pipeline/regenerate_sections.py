@@ -26,8 +26,11 @@ from src.ingestion.law_extractor import (
     LawDocument,
     LawSection,
     _extract_references,
+    _normalize_section_headers,
+    _parse_sections,
     _save_section_files,
     _split_paragraphs,
+    _strip_page_headers,
     _trim_trailing_structure,
 )
 
@@ -50,6 +53,41 @@ def _load_doc_from_cache(cache_file: Path) -> LawDocument:
         ocr_engine=data.get("ocr_engine", ""),
         total_sections=data.get("total_sections", len(sections)),
     )
+
+
+def _reparse_and_update_cache(cache_file: Path, doc: LawDocument) -> tuple[int, int]:
+    """Re-run _parse_sections from cached full_text and update the cache JSON.
+
+    Uses the same preprocessing pipeline as extract_law() (strip page headers,
+    normalize section headers) so the fixed _SECTION_START_RE takes effect.
+
+    Returns (old_section_count, new_section_count).
+    """
+    full_text = doc.full_text
+    if not full_text:
+        return len(doc.sections), len(doc.sections)
+
+    # Mirror extract_law() preprocessing
+    text = _strip_page_headers(full_text)
+    text = _normalize_section_headers(text)
+    new_sections = _parse_sections(text)
+
+    # Update doc in-place
+    old_count = len(doc.sections)
+    doc.sections = new_sections
+    doc.total_sections = len(new_sections)
+
+    # Write back to cache
+    data = json.loads(cache_file.read_text(encoding="utf-8"))
+    data["sections"] = [
+        {"number": s.number, "label": s.label, "text": s.text,
+         "part": s.part, "chapter": s.chapter, "paragraphs": s.paragraphs,
+         "references": s.references}
+        for s in new_sections
+    ]
+    data["total_sections"] = len(new_sections)
+    cache_file.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    return old_count, len(new_sections)
 
 
 def _resplit_and_update_cache(cache_file: Path, doc: LawDocument) -> int:
@@ -118,6 +156,8 @@ def _cleanup_and_update_cache(cache_file: Path, doc: LawDocument) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Regenerate per-section MD files from cache")
     parser.add_argument("--dry-run", action="store_true", help="List files only, no write")
+    parser.add_argument("--reparse", action="store_true",
+                        help="Re-run _parse_sections from cached full_text (fixes ghost sections)")
     parser.add_argument("--resplit", action="store_true",
                         help="Re-run Gemini วรรค splitting and update cache JSON")
     parser.add_argument("--re-ref", action="store_true",
@@ -137,6 +177,10 @@ def main() -> None:
         doc = _load_doc_from_cache(cf)
         section_count = len(doc.sections)
         print(f"  {doc.law_short_name or doc.law_name}  ({section_count} sections)")
+
+        if args.reparse and not args.dry_run:
+            old_n, new_n = _reparse_and_update_cache(cf, doc)
+            print(f"    reparse: {old_n} → {new_n} sections")
 
         if args.cleanup and not args.dry_run:
             changed = _cleanup_and_update_cache(cf, doc)

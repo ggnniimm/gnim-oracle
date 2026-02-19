@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.ingestion.law_extractor import (
+    _parse_sections,
     _post_merge_paragraphs,
     _split_list_para,
     _split_paragraphs,
@@ -321,6 +322,63 @@ class TestPostMergeParagraphs:
         assert "การยกเว้น" in result[2]
         assert "กรณีตามวรรคหนึ่ง" in result[3]
         assert "ตาม (๖)" in result[4]
+
+
+# ── _parse_sections tests ───────────────────────────────────────────────────
+
+class TestParseSections:
+    def test_cross_ref_at_line_start_not_a_section(self):
+        """Ghost-section bug: 'มาตรา ๑๓ หรือมาตรา ๑๔' at line-start must NOT
+        create a new section — it is a cross-reference inside มาตรา ๑๓'s body.
+
+        Real case: พ.ร.บ.จัดซื้อจัดจ้างฯ มาตรา 13 has multiple วรรค whose text
+        wraps so that 'มาตรา  ๑๓  หรือมาตรา  ๑๔' begins a line. Old code created
+        3 phantom 'มาตรา 13' sections; the last overwrote มาตรา_013.md with wrong
+        content.
+        """
+        text = (
+            "มาตรา ๑๓\n"
+            "ในการจัดซื้อจัดจ้าง ผู้ที่มีหน้าที่ดำเนินการต้องไม่เป็นผู้มีส่วนได้เสีย\n"
+            "\n"
+            "ในกรณีที่ปรากฏว่าผู้ดำเนินการเป็นผู้มีส่วนได้เสียและการไม่ปฏิบัติตาม\n"
+            "มาตรา ๑๓ หรือมาตรา ๑๔ มีผลต่อการจัดซื้อจัดจ้าง\n"
+            "ให้คณะกรรมการวินิจฉัย\n"
+            "มีอำนาจสั่งยกเลิก\n"
+            "\n"
+            "มาตรา ๑๔\n"
+            "เพื่อให้การจัดซื้อจัดจ้างเป็นไปโดยเรียบร้อย\n"
+        )
+        sections = _parse_sections(text)
+        numbers = [s.number for s in sections]
+        assert numbers == ["13", "14"], f"Expected ['13','14'], got {numbers}"
+        # มาตรา 13 must include the cross-reference line in its body
+        assert "หรือมาตรา ๑๔" in sections[0].text
+        assert "สั่งยกเลิก" in sections[0].text
+
+    def test_real_section_header_still_matches(self):
+        """Ensure the negative lookahead does not break normal section headers."""
+        text = (
+            "มาตรา ๑๕\n"
+            "ผู้มีอำนาจอนุมัติสั่งซื้อหรือสั่งจ้างพัสดุ\n"
+            "\n"
+            "มาตรา ๑๖\n"
+            "ให้รัฐมนตรีรักษาการตามพระราชบัญญัตินี้\n"
+        )
+        sections = _parse_sections(text)
+        assert [s.number for s in sections] == ["15", "16"]
+
+    def test_section_with_slash_number(self):
+        """Section numbers like '60/1' still parse correctly."""
+        text = (
+            "มาตรา ๖๐/๑\n"
+            "บทบัญญัติพิเศษสำหรับกรณีนี้\n"
+            "\n"
+            "มาตรา ๖๑\n"
+            "บทบัญญัติทั่วไป\n"
+        )
+        sections = _parse_sections(text)
+        assert sections[0].number == "60/1"
+        assert sections[1].number == "61"
 
 
 # ── _split_list_para tests ──────────────────────────────────────────────────

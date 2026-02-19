@@ -52,8 +52,16 @@ _SECTION_RE = re.compile(
     r"^((?:มาตรา|ข้อ)\s+[๐-๙\d]+(?:/[๐-๙\d]+)?)\s*\n?(.*?)(?=^(?:มาตรา|ข้อ)\s+[๐-๙\d]|\Z)",
     re.MULTILINE | re.DOTALL,
 )
-# Detect section marker at start of line (for splitting only)
-_SECTION_START_RE = re.compile(r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+", re.MULTILINE)
+# Detect section marker at start of line (for splitting only).
+# Negative lookahead excludes cross-references like "มาตรา ๑๓ หรือมาตรา ๑๔":
+# after the number, if the same line continues with หรือ/และ/ถึง/วรรค (horizontal
+# whitespace only — [^\S\n]* — so we don't cross to the next line), it's a reference,
+# not a section header.  Fixes ghost-section bug where cross-refs at line-start were
+# parsed as new section boundaries.
+_SECTION_START_RE = re.compile(
+    r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+(?:/[๐-๙\d]+)?\b(?![^\S\n]*(?:หรือ|และ|ถึง|วรรค))",
+    re.MULTILINE,
+)
 
 
 @dataclass
