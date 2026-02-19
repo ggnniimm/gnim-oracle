@@ -266,6 +266,20 @@ class TestPostMergeParagraphs:
         assert "ผู้มีผลประโยชน์ร่วมกัน" in result[0]
         assert "การขัดขวางการแข่งขัน" in result[0]
 
+    def test_ratchakitchanubeksa_continuation(self):
+        """มาตรา 2: 'ในราชกิจจานุเบกษา' is a word-wrap fragment, never a new วรรค.
+
+        PDF blank-line artifact splits "...วันประกาศ" and "ในราชกิจจานุเบกษา..."
+        into 2 paragraphs. _CONTINUATION_RE must merge them back.
+        """
+        paras = [
+            "พระราชบัญญัตินี้ให้ใช้บังคับเมื่อพ้นกำหนดหนึ่งร้อยแปดสิบวันนับแต่วันประกาศ",
+            "ในราชกิจจานุเบกษาเป็นต้นไป",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 1
+        assert "ในราชกิจจานุเบกษา" in result[0]
+
     def test_phuea_starts_new_varak(self):
         """Issue #5: 'เพื่อ' at paragraph start is a new วรรค, not a continuation.
 

@@ -408,7 +408,9 @@ def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
 _CONTINUATION_RE = re.compile(
     # "เพื่อ" removed (issue #5): it frequently starts independent วรรค in Thai law
     # e.g. "เพื่อให้การดำเนินงาน..." — a new legal sentence, not a continuation.
-    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง)"
+    # "ในราชกิจจา" added: "ในราชกิจจานุเบกษา" is always a prepositional complement
+    # (e.g. "...นับแต่วันประกาศ\nในราชกิจจานุเบกษาเป็นต้นไป") — never a new วรรค.
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา)"
 )
 
 # Broader continuation patterns valid only inside list-context blocks.
