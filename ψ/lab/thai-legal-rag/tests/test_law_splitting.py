@@ -266,6 +266,48 @@ class TestPostMergeParagraphs:
         assert "ผู้มีผลประโยชน์ร่วมกัน" in result[0]
         assert "การขัดขวางการแข่งขัน" in result[0]
 
+    def test_phuea_starts_new_varak(self):
+        """Issue #5: 'เพื่อ' at paragraph start is a new วรรค, not a continuation.
+
+        มาตรา 6 should have 4 วรรค. Previously, Pass 2 merged วรรค 2 into วรรค 1
+        because _CONTINUATION_RE matched 'เพื่อ'.
+        """
+        paras = [
+            "เพื่อให้การปฏิบัติงานของรัฐวิสาหกิจเป็นไปตามมาตรฐาน",
+            "เพื่อให้การดำเนินงานของรัฐวิสาหกิจเป็นประโยชน์สูงสุด",
+            "ระเบียบ ข้อบังคับ หลักเกณฑ์ตามวรรคสอง ให้ตราเป็นพระราชกฤษฎีกา",
+            "ระเบียบ ข้อบังคับ หลักเกณฑ์ตามวรรคสองและวรรคสาม ให้นำมาใช้บังคับ",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 4
+        assert result[0].startswith("เพื่อให้การปฏิบัติ")
+        assert result[1].startswith("เพื่อให้การดำเนินงาน")
+
+    def test_cross_reference_not_list_context(self):
+        """Issue #6: inline cross-references 'ตาม (๑) (๒)' must NOT trigger list context.
+
+        มาตรา 7 should produce 5 วรรค. Previously all 5 merged into 1 because
+        วรรค 2 contains 'ตาม (๑) (๒) และ (๓)' — _EMBEDDED_LIST_RE matched these
+        inline markers, keeping list context alive and merging วรรค 3-5.
+        """
+        paras = [
+            # วรรค 1: list items inline (Gemini-merged) — no newlines before markers
+            "พระราชบัญญัตินี้มิให้ใช้บังคับแก่ (๑) รัฐวิสาหกิจ (๒) กองทุน (๓) องค์การมหาชน (๖) กิจการอื่น",
+            # วรรค 2: references (๑)(๒)(๓) inline — NOT list items
+            "การจัดซื้อจัดจ้างตาม (๑) (๒) และ (๓) ที่ได้รับยกเว้น ให้หน่วยงานของรัฐปฏิบัติตามหลักเกณฑ์",
+            # วรรค 3-5: independent legal sentences
+            "การยกเว้นมิให้นำบทบัญญัติแห่งพระราชบัญญัตินี้มาใช้บังคับ ให้ตราเป็นพระราชกฤษฎีกา",
+            "กรณีตามวรรคหนึ่งและวรรคสาม ให้หน่วยงานของรัฐจัดทำรายงานสรุปผล",
+            "การจัดซื้อจัดจ้างตาม (๖) นอกจากจะต้องปฏิบัติตามกฎหมาย",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 5
+        assert "มิให้ใช้บังคับ" in result[0]
+        assert "ตาม (๑) (๒)" in result[1]
+        assert "การยกเว้น" in result[2]
+        assert "กรณีตามวรรคหนึ่ง" in result[3]
+        assert "ตาม (๖)" in result[4]
+
 
 # ── _split_list_para tests ──────────────────────────────────────────────────
 

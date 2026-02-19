@@ -291,8 +291,11 @@ def _normalize_section_headers(text: str) -> str:
 _PARA_GEMINI_MIN_CHARS = 300
 
 _LIST_ITEM_RE = re.compile(r"^\([ก-ฮ๐-๙\d]+\)")
-# Detect list markers embedded anywhere in text (for already-merged paragraphs)
-_EMBEDDED_LIST_RE = re.compile(r"\([ก-ฮ๐-๙\d]+\)")
+# Detect list markers at the START OF A LINE within a (possibly multi-line) paragraph.
+# Intentionally does NOT match inline cross-references like "ตาม (๑) (๒) และ (๓)"
+# where the marker appears mid-sentence — those are references, not list items.
+# Fix issue #6: only line-start markers indicate list structure.
+_EMBEDDED_LIST_RE = re.compile(r"(?m)(?:^|\n)\s*\([ก-ฮ๐-๙\d]+\)")
 # Definition list items: "คำ" หมายความว่า / หมายถึง — treated as list items
 # Matches both ASCII quotes (") and Unicode curly quotes (\u201c\u201d).
 # Allows optional content between closing quote and หมายความว่า
@@ -403,7 +406,9 @@ def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
 
 
 _CONTINUATION_RE = re.compile(
-    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|เพื่อ)"
+    # "เพื่อ" removed (issue #5): it frequently starts independent วรรค in Thai law
+    # e.g. "เพื่อให้การดำเนินงาน..." — a new legal sentence, not a continuation.
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง)"
 )
 
 # Broader continuation patterns valid only inside list-context blocks.
