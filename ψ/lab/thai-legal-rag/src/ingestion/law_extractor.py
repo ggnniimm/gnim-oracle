@@ -59,7 +59,7 @@ _SECTION_RE = re.compile(
 # not a section header.  Fixes ghost-section bug where cross-refs at line-start were
 # parsed as new section boundaries.
 _SECTION_START_RE = re.compile(
-    r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+(?:/[๐-๙\d]+)?\b(?![^\S\n]*(?:หรือ|และ|ถึง|วรรค))",
+    r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+(?:/[๐-๙\d]+)?\b(?![^\S\n]*(?:หรือ|และ|ถึง|วรรค|มาตรา|ข้อ))",
     re.MULTILINE,
 )
 
@@ -418,7 +418,9 @@ _CONTINUATION_RE = re.compile(
     # e.g. "เพื่อให้การดำเนินงาน..." — a new legal sentence, not a continuation.
     # "ในราชกิจจา" added: "ในราชกิจจานุเบกษา" is always a prepositional complement
     # (e.g. "...นับแต่วันประกาศ\nในราชกิจจานุเบกษาเป็นต้นไป") — never a new วรรค.
-    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา)"
+    # "ให้เป็นไปตาม" added: predicate clause that completes a subject sentence split by
+    # PDF blank lines (e.g. "รายละเอียด...ในหมวดนี้\nให้เป็นไปตามระเบียบ...") — never starts a วรรค.
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา|ให้เป็นไปตาม)"
 )
 
 # Broader continuation patterns valid only inside list-context blocks.
@@ -636,7 +638,9 @@ _STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\
 
 # Legal content markers — lines containing these are real legal text, not titles
 _LEGAL_CONTENT_MARKERS = re.compile(
-    r"(มาตรา|ข้อ|วรรค|พ\.ร\.บ\.|พระราชบัญญัติ|ระเบียบ|ให้|ต้อง|ห้าม|กรณี|ตาม|แห่ง)"
+    # "ข้อ" requires a following space+number to avoid matching compound words
+    # like "ข้อความ", "ข้อตกลง", "ข้อเสนอ" as false legal-content triggers.
+    r"(มาตรา|ข้อ\s+[๐-๙\d]|วรรค|พ\.ร\.บ\.|พระราชบัญญัติ|ระเบียบ|ให้|ต้อง|ห้าม|กรณี|ตาม|แห่ง)"
 )
 
 
