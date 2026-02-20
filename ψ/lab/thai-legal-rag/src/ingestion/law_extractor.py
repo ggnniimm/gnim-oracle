@@ -420,7 +420,7 @@ _CONTINUATION_RE = re.compile(
     # (e.g. "...นับแต่วันประกาศ\nในราชกิจจานุเบกษาเป็นต้นไป") — never a new วรรค.
     # "ให้เป็นไปตาม" added: predicate clause that completes a subject sentence split by
     # PDF blank lines (e.g. "รายละเอียด...ในหมวดนี้\nให้เป็นไปตามระเบียบ...") — never starts a วรรค.
-    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา|ให้เป็นไปตาม)"
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา|ให้เป็นไปตาม|ทั้งนี้)"
 )
 
 # Broader continuation patterns valid only inside list-context blocks.
@@ -646,7 +646,14 @@ _STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\
 # followed by spaces/trailing whitespace), the sentence is complete and the
 # following short non-legal line is a structural heading, not a continuation.
 _SENTENCE_FINAL_RE = re.compile(
-    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว)\s*$"
+    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว|อนุโลม)\s*$"
+)
+
+# Signature/closing block markers that appear at the end of Thai law documents.
+# Everything from these markers to the end of the section text should be trimmed
+# (they belong to the document footer, not the last มาตรา/ข้อ).
+_SIGNATURE_BLOCK_RE = re.compile(
+    r"^(?:ผู้รับสนองพระราชโองการ|หมายเหตุ\s*:-|หมายเหตุ\s*:)"
 )
 
 # Legal content markers — lines containing these are real legal text, not titles
@@ -669,6 +676,18 @@ def _trim_trailing_structure(section_text: str) -> str:
     (e.g. "หมวด ๓ หรือหมวด ๔ แล้วแต่กรณี").
     """
     lines = section_text.splitlines()
+
+    # Fast-path: trim signature/closing block (ผู้รับสนองพระราชโองการ, หมายเหตุ :-).
+    # These markers only appear at the very end of a Thai law document (inside
+    # the last มาตรา/ข้อ) and must be stripped wholesale.
+    for idx, line in enumerate(lines):
+        if idx == 0:
+            continue  # never trim the label line
+        if _SIGNATURE_BLOCK_RE.match(line.strip()):
+            trimmed = "\n".join(lines[:idx]).strip()
+            if trimmed:
+                return trimmed
+            break  # degenerate: label-only section, fall through to normal trim
 
     # Scan from bottom: collect a candidate trim block.
     # The block may contain structural headers + title lines + blanks.
@@ -717,10 +736,12 @@ def _trim_trailing_structure(section_text: str) -> str:
                 and len(stripped) <= 30
                 and not _LIST_ITEM_RE.match(stripped)):
             prev_j = i - 1
-            while prev_j >= 1 and not lines[prev_j].strip():
+            while prev_j >= 0 and not lines[prev_j].strip():
                 prev_j -= 1
-            prev_stripped = lines[prev_j].strip() if prev_j >= 1 else ""
-            if prev_stripped and _SENTENCE_FINAL_RE.search(prev_stripped):
+            prev_stripped = lines[prev_j].strip() if prev_j >= 0 else ""
+            prev_is_sentence_final = bool(prev_stripped and _SENTENCE_FINAL_RE.search(prev_stripped))
+            prev_is_list_item = bool(prev_stripped and _LIST_ITEM_RE.match(prev_stripped))
+            if prev_is_sentence_final or prev_is_list_item:
                 found_nonlegal_trailing = True
                 trim_from = i
             i -= 1
