@@ -526,8 +526,14 @@ def _split_paragraphs(section_text: str) -> list[str]:
     - Blank-line split is used only when Gemini is unavailable or fails.
     """
     lines = section_text.strip().splitlines()
-    # Drop the label line
-    content_lines = lines[1:] if lines and _SECTION_START_RE.match(lines[0].strip()) else lines
+    # Drop the label prefix but preserve any inline content on the same line.
+    # e.g. "ข้อ ๒ ระเบียบนี้ให้ใช้บังคับ..." → keep "ระเบียบนี้ให้ใช้บังคับ..."
+    if lines and _SECTION_START_RE.match(lines[0].strip()):
+        m = _SECTION_START_RE.match(lines[0].strip())
+        inline = lines[0].strip()[m.end():].strip()
+        content_lines = ([inline] if inline else []) + lines[1:]
+    else:
+        content_lines = lines
     # Strip page headers before any splitting
     content = _strip_page_headers("\n".join(content_lines))
 
@@ -636,6 +642,13 @@ _STRUCT_PHAK_RE = re.compile(r"^ภาค(?:\s*ที่)?\s+[๐-๙\d]+\s*$")
 # หมวด is structural ONLY when standalone (no continuation text after the title)
 _STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\s*$")
 
+# Thai sentence-final words — when a line ends with one of these (optionally
+# followed by spaces/trailing whitespace), the sentence is complete and the
+# following short non-legal line is a structural heading, not a continuation.
+_SENTENCE_FINAL_RE = re.compile(
+    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว)\s*$"
+)
+
 # Legal content markers — lines containing these are real legal text, not titles
 _LEGAL_CONTENT_MARKERS = re.compile(
     # "ข้อ" requires a following space+number to avoid matching compound words
@@ -659,10 +672,14 @@ def _trim_trailing_structure(section_text: str) -> str:
 
     # Scan from bottom: collect a candidate trim block.
     # The block may contain structural headers + title lines + blanks.
-    # We only trim if the block contains at least one structural header.
+    # We trim if:
+    #   (a) the block contains at least one formal structural header (หมวด/ส่วน/ภาค), OR
+    #   (b) all collected non-blank trailing lines are non-legal AND short (≤ 30 chars),
+    #       indicating a standalone topic heading between sections (common in ระเบียบ).
     # Once we find a structural header, we stop scanning upward when we
     # hit a line with legal content (to avoid eating real section text).
     found_structural = False
+    found_nonlegal_trailing = False
     trim_from = len(lines)
     i = len(lines) - 1
     while i >= 1:  # never trim the first line (section label)
@@ -687,16 +704,33 @@ def _trim_trailing_structure(section_text: str) -> str:
         if found_structural:
             break
 
-        # Non-legal line below structural header — likely a title/subtitle
-        if not _LEGAL_CONTENT_MARKERS.search(stripped):
-            trim_from = i
+        # Non-legal short line — candidate for standalone topic heading
+        # (e.g. "คณะกรรมการซื้อหรือจ้าง", "วิธีประกาศเชิญชวนทั่วไป")
+        # Guards:
+        #   - list items like (๑)(ก) are content, not headers
+        #   - only mark as trailing heading if the previous content line ends
+        #     with a sentence-final word (ได้/แล้ว/ต่อไป/...) so we don't
+        #     accidentally trim word-wrapped continuations ("มีอำนาจสั่งยกเลิก")
+        # Either way: continue scanning (don't break) — a structural header
+        # above may still trigger the trim via the found_structural path.
+        if (not _LEGAL_CONTENT_MARKERS.search(stripped)
+                and len(stripped) <= 30
+                and not _LIST_ITEM_RE.match(stripped)):
+            prev_j = i - 1
+            while prev_j >= 1 and not lines[prev_j].strip():
+                prev_j -= 1
+            prev_stripped = lines[prev_j].strip() if prev_j >= 1 else ""
+            if prev_stripped and _SENTENCE_FINAL_RE.search(prev_stripped):
+                found_nonlegal_trailing = True
+                trim_from = i
             i -= 1
             continue
 
-        # Legal content line — stop scanning
+        # Legal content line or long non-legal line — stop scanning
         break
 
-    if found_structural and trim_from < len(lines):
+    should_trim = (found_structural or found_nonlegal_trailing) and trim_from < len(lines)
+    if should_trim:
         # Also trim trailing blank lines before the structural block
         while trim_from > 1 and not lines[trim_from - 1].strip():
             trim_from -= 1
