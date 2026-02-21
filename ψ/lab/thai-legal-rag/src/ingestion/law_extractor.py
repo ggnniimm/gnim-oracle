@@ -420,7 +420,13 @@ _CONTINUATION_RE = re.compile(
     # (e.g. "...นับแต่วันประกาศ\nในราชกิจจานุเบกษาเป็นต้นไป") — never a new วรรค.
     # "ให้เป็นไปตาม" added: predicate clause that completes a subject sentence split by
     # PDF blank lines (e.g. "รายละเอียด...ในหมวดนี้\nให้เป็นไปตามระเบียบ...") — never starts a วรรค.
-    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา|ให้เป็นไปตาม|ทั้งนี้)"
+    # "ประกอบด้วย" added: always a hanging predicate ("consists of") completing the
+    # previous subject sentence (e.g. "ให้มีคณะกรรมการ...\nประกอบด้วย (๑)...").
+    # "จากนั้น" added: sequence connector ("after that") continuing the same provision.
+    # "นับแต่" added: temporal preposition ("counting from") never starts a new วรรค;
+    # always completes a deadline clause split by PDF word-wrap
+    # (e.g. "ภายในเจ็ดวันทำการ\nนับแต่วันประกาศ...").
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา|ให้เป็นไปตาม|ทั้งนี้|ประกอบด้วย|จากนั้น|นับแต่)"
 )
 
 # Broader continuation patterns valid only inside list-context blocks.
@@ -646,14 +652,14 @@ _STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\
 # followed by spaces/trailing whitespace), the sentence is complete and the
 # following short non-legal line is a structural heading, not a continuation.
 _SENTENCE_FINAL_RE = re.compile(
-    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว|อนุโลม)\s*$"
+    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว|อนุโลม|กำหนด|กําหนด)\s*$"
 )
 
 # Signature/closing block markers that appear at the end of Thai law documents.
 # Everything from these markers to the end of the section text should be trimmed
 # (they belong to the document footer, not the last มาตรา/ข้อ).
 _SIGNATURE_BLOCK_RE = re.compile(
-    r"^(?:ผู้รับสนองพระราชโองการ|หมายเหตุ\s*:-|หมายเหตุ\s*:)"
+    r"^(?:ผู้รับสนองพระราชโองการ|หมายเหตุ\s*:-|หมายเหตุ\s*:|ประกาศ\s+ณ\s+วัน)"
 )
 
 # Legal content markers — lines containing these are real legal text, not titles
@@ -677,7 +683,7 @@ def _trim_trailing_structure(section_text: str) -> str:
     """
     lines = section_text.splitlines()
 
-    # Fast-path: trim signature/closing block (ผู้รับสนองพระราชโองการ, หมายเหตุ :-).
+    # Fast-path: trim signature/closing block (ผู้รับสนองพระราชโองการ, หมายเหตุ :-, ประกาศ ณ).
     # These markers only appear at the very end of a Thai law document (inside
     # the last มาตรา/ข้อ) and must be stripped wholesale.
     for idx, line in enumerate(lines):
@@ -688,6 +694,26 @@ def _trim_trailing_structure(section_text: str) -> str:
             if trimmed:
                 return trimmed
             break  # degenerate: label-only section, fall through to normal trim
+
+    # Fast-path: trim trailing chapter/section header block.
+    # The bottom-up scan cannot reach structural headers (หมวด/ส่วน) when
+    # intervening chapter-title lines contain legal markers like "ให้"
+    # (e.g. "การลงโทษให้เป็นผู้ทิ้งงาน" stops the scan before reaching "หมวด ๘").
+    # Solution: scan the last 12 lines top-down for the TOPMOST standalone structural
+    # header, then trim from there (removing that header and everything below it).
+    # _STRUCT_*_RE requires the line to be ONLY the header (e.g. "หมวด ๘") so
+    # inline references like "ตามหมวด ๕ หรือหมวด ๖" are safe (they have extra text).
+    _TAIL_SCAN = 12
+    tail_start = max(1, len(lines) - _TAIL_SCAN)  # never trim the label line
+    for tail_abs in range(tail_start, len(lines)):
+        tl = lines[tail_abs].strip()
+        if (_STRUCT_CHAPTER_RE.match(tl) or _STRUCT_PART_RE.match(tl)
+                or _STRUCT_PHAK_RE.match(tl)):
+            # Found topmost structural header in tail window — trim from here
+            trimmed = "\n".join(lines[:tail_abs]).strip()
+            if trimmed:
+                return trimmed
+            break  # degenerate: structural header right after label
 
     # Scan from bottom: collect a candidate trim block.
     # The block may contain structural headers + title lines + blanks.
