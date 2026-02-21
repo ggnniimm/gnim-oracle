@@ -37,7 +37,8 @@ _SYSTEM_PROMPT = """\
 2. หากไม่มีข้อมูลเพียงพอ ให้บอกตรงๆ — ห้ามเดา
 3. ตอบภาษาไทยที่ชัดเจน อ่านง่าย
 4. สรุปขั้นตอนปฏิบัติในตอนท้ายเสมอ
-5. อ้างอิงแหล่งที่มา (ชื่อเอกสาร) ให้ครบถ้วน"""
+5. อ้างอิงแหล่งที่มา (ชื่อเอกสาร) ให้ครบถ้วน
+6. กฎหมายบางฉบับมีหลายเวอร์ชัน (มีการแก้ไขหรือยกเลิก) — หากเอกสารอ้างอิงมีหลายฉบับในปี พ.ศ. ต่างกัน ให้ยึดฉบับที่มี พ.ศ. สูงสุด (ล่าสุด) เป็นหลัก และแจ้งผู้ถามด้วยว่าฉบับเก่าถูกแก้ไข/ยกเลิกแล้ว"""
 
 
 _USER_PROMPT_TEMPLATE = """\
@@ -55,8 +56,10 @@ def build_context(chunks: list[dict]) -> str:
     for i, chunk in enumerate(chunks, 1):
         source = chunk.get("source_name", chunk.get("source", "unknown"))
         category = chunk.get("category", "")
+        law_year_be = chunk.get("law_year_be", "")
+        year_str = f" [พ.ศ. {law_year_be}]" if law_year_be else ""
         text = chunk.get("text", "")
-        parts.append(f"[{i}] **{source}** ({category})\n{text}")
+        parts.append(f"[{i}] **{source}**{year_str} ({category})\n{text}")
     return "\n\n---\n\n".join(parts)
 
 
