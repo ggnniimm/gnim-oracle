@@ -61,8 +61,10 @@ class Retriever:
 
     def retrieve(self, query: str, expand: bool = True) -> dict[str, list[dict]]:
         """Sync wrapper."""
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        try:
+            loop = asyncio.get_running_loop()
             import nest_asyncio
             nest_asyncio.apply()
-        return loop.run_until_complete(self.retrieve_async(query, expand=expand))
+            return loop.run_until_complete(self.retrieve_async(query, expand=expand))
+        except RuntimeError:
+            return asyncio.run(self.retrieve_async(query, expand=expand))
