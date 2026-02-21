@@ -15,6 +15,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from src.ingestion.law_extractor import (
+    _parse_sections,
     _post_merge_paragraphs,
     _split_list_para,
     _split_paragraphs,
@@ -265,6 +266,189 @@ class TestPostMergeParagraphs:
         assert len(result) == 1
         assert "ผู้มีผลประโยชน์ร่วมกัน" in result[0]
         assert "การขัดขวางการแข่งขัน" in result[0]
+
+    def test_ratchakitchanubeksa_continuation(self):
+        """มาตรา 2: 'ในราชกิจจานุเบกษา' is a word-wrap fragment, never a new วรรค.
+
+        PDF blank-line artifact splits "...วันประกาศ" and "ในราชกิจจานุเบกษา..."
+        into 2 paragraphs. _CONTINUATION_RE must merge them back.
+        """
+        paras = [
+            "พระราชบัญญัตินี้ให้ใช้บังคับเมื่อพ้นกำหนดหนึ่งร้อยแปดสิบวันนับแต่วันประกาศ",
+            "ในราชกิจจานุเบกษาเป็นต้นไป",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 1
+        assert "ในราชกิจจานุเบกษา" in result[0]
+
+    def test_phuea_starts_new_varak(self):
+        """Issue #5: 'เพื่อ' at paragraph start is a new วรรค, not a continuation.
+
+        มาตรา 6 should have 4 วรรค. Previously, Pass 2 merged วรรค 2 into วรรค 1
+        because _CONTINUATION_RE matched 'เพื่อ'.
+        """
+        paras = [
+            "เพื่อให้การปฏิบัติงานของรัฐวิสาหกิจเป็นไปตามมาตรฐาน",
+            "เพื่อให้การดำเนินงานของรัฐวิสาหกิจเป็นประโยชน์สูงสุด",
+            "ระเบียบ ข้อบังคับ หลักเกณฑ์ตามวรรคสอง ให้ตราเป็นพระราชกฤษฎีกา",
+            "ระเบียบ ข้อบังคับ หลักเกณฑ์ตามวรรคสองและวรรคสาม ให้นำมาใช้บังคับ",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 4
+        assert result[0].startswith("เพื่อให้การปฏิบัติ")
+        assert result[1].startswith("เพื่อให้การดำเนินงาน")
+
+    def test_hai_pen_pai_tam_continuation(self):
+        """Fix C: 'ให้เป็นไปตาม' at start of orphan paragraph merges into previous.
+
+        Pattern found in มาตรา 78, 99: "รายละเอียด...ในหมวดนี้" split by PDF
+        blank line from its predicate "ให้เป็นไปตามระเบียบที่รัฐมนตรีกำหนด".
+        Both lines form one legal sentence; Excel reference counts this as 1 วรรค.
+        """
+        paras = [
+            "รายละเอียดวิธีการและขั้นตอนการทำสัญญาที่ไม่ได้บัญญัติไว้ในหมวดนี้",
+            "ให้เป็นไปตามระเบียบที่รัฐมนตรีกำหนด",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 1
+        assert "ในหมวดนี้" in result[0]
+        assert "ให้เป็นไปตาม" in result[0]
+
+    def test_cross_reference_not_list_context(self):
+        """Issue #6: inline cross-references 'ตาม (๑) (๒)' must NOT trigger list context.
+
+        มาตรา 7 should produce 5 วรรค. Previously all 5 merged into 1 because
+        วรรค 2 contains 'ตาม (๑) (๒) และ (๓)' — _EMBEDDED_LIST_RE matched these
+        inline markers, keeping list context alive and merging วรรค 3-5.
+        """
+        paras = [
+            # วรรค 1: list items inline (Gemini-merged) — no newlines before markers
+            "พระราชบัญญัตินี้มิให้ใช้บังคับแก่ (๑) รัฐวิสาหกิจ (๒) กองทุน (๓) องค์การมหาชน (๖) กิจการอื่น",
+            # วรรค 2: references (๑)(๒)(๓) inline — NOT list items
+            "การจัดซื้อจัดจ้างตาม (๑) (๒) และ (๓) ที่ได้รับยกเว้น ให้หน่วยงานของรัฐปฏิบัติตามหลักเกณฑ์",
+            # วรรค 3-5: independent legal sentences
+            "การยกเว้นมิให้นำบทบัญญัติแห่งพระราชบัญญัตินี้มาใช้บังคับ ให้ตราเป็นพระราชกฤษฎีกา",
+            "กรณีตามวรรคหนึ่งและวรรคสาม ให้หน่วยงานของรัฐจัดทำรายงานสรุปผล",
+            "การจัดซื้อจัดจ้างตาม (๖) นอกจากจะต้องปฏิบัติตามกฎหมาย",
+        ]
+        result = _post_merge_paragraphs(paras)
+        assert len(result) == 5
+        assert "มิให้ใช้บังคับ" in result[0]
+        assert "ตาม (๑) (๒)" in result[1]
+        assert "การยกเว้น" in result[2]
+        assert "กรณีตามวรรคหนึ่ง" in result[3]
+        assert "ตาม (๖)" in result[4]
+
+
+# ── _parse_sections tests ───────────────────────────────────────────────────
+
+class TestParseSections:
+    def test_cross_ref_at_line_start_not_a_section(self):
+        """Ghost-section bug: 'มาตรา ๑๓ หรือมาตรา ๑๔' at line-start must NOT
+        create a new section — it is a cross-reference inside มาตรา ๑๓'s body.
+
+        Real case: พ.ร.บ.จัดซื้อจัดจ้างฯ มาตรา 13 has multiple วรรค whose text
+        wraps so that 'มาตรา  ๑๓  หรือมาตรา  ๑๔' begins a line. Old code created
+        3 phantom 'มาตรา 13' sections; the last overwrote มาตรา_013.md with wrong
+        content.
+        """
+        text = (
+            "มาตรา ๑๓\n"
+            "ในการจัดซื้อจัดจ้าง ผู้ที่มีหน้าที่ดำเนินการต้องไม่เป็นผู้มีส่วนได้เสีย\n"
+            "\n"
+            "ในกรณีที่ปรากฏว่าผู้ดำเนินการเป็นผู้มีส่วนได้เสียและการไม่ปฏิบัติตาม\n"
+            "มาตรา ๑๓ หรือมาตรา ๑๔ มีผลต่อการจัดซื้อจัดจ้าง\n"
+            "ให้คณะกรรมการวินิจฉัย\n"
+            "มีอำนาจสั่งยกเลิก\n"
+            "\n"
+            "มาตรา ๑๔\n"
+            "เพื่อให้การจัดซื้อจัดจ้างเป็นไปโดยเรียบร้อย\n"
+        )
+        sections = _parse_sections(text)
+        numbers = [s.number for s in sections]
+        assert numbers == ["13", "14"], f"Expected ['13','14'], got {numbers}"
+        # มาตรา 13 must include the cross-reference line in its body
+        assert "หรือมาตรา ๑๔" in sections[0].text
+        assert "สั่งยกเลิก" in sections[0].text
+
+    def test_real_section_header_still_matches(self):
+        """Ensure the negative lookahead does not break normal section headers."""
+        text = (
+            "มาตรา ๑๕\n"
+            "ผู้มีอำนาจอนุมัติสั่งซื้อหรือสั่งจ้างพัสดุ\n"
+            "\n"
+            "มาตรา ๑๖\n"
+            "ให้รัฐมนตรีรักษาการตามพระราชบัญญัตินี้\n"
+        )
+        sections = _parse_sections(text)
+        assert [s.number for s in sections] == ["15", "16"]
+
+    def test_section_with_slash_number(self):
+        """Section numbers like '60/1' still parse correctly."""
+        text = (
+            "มาตรา ๖๐/๑\n"
+            "บทบัญญัติพิเศษสำหรับกรณีนี้\n"
+            "\n"
+            "มาตรา ๖๑\n"
+            "บทบัญญัติทั่วไป\n"
+        )
+        sections = _parse_sections(text)
+        assert sections[0].number == "60/1"
+        assert sections[1].number == "61"
+
+    def test_multi_mattra_cross_ref_not_a_section(self):
+        """Fix A: 'มาตรา ๑๕ มาตรา ๒๕' at line-start is NOT a section header.
+
+        ระเบียบ documents reference multiple มาตรา at once (e.g. cross-reference
+        tables). The sequence 'มาตรา X มาตรา Y' after the first number signals a
+        cross-reference list, not a new section boundary.
+        """
+        text = (
+            "ข้อ ๑\n"
+            "ให้ใช้บังคับตาม\n"
+            "มาตรา  ๑๕  มาตรา  ๒๕  วรรคสี่  มาตรา  ๔๓  วรรคสาม\n"
+            "แห่งพระราชบัญญัตินี้\n"
+            "\n"
+            "ข้อ ๒\n"
+            "ให้รัฐมนตรีรักษาการ\n"
+        )
+        sections = _parse_sections(text)
+        numbers = [s.number for s in sections]
+        assert numbers == ["1", "2"], f"Expected ['1','2'], got {numbers}"
+        assert "มาตรา  ๑๕" in sections[0].text
+
+    def test_ko_cross_ref_not_a_section(self):
+        """Fix A: 'ข้อ ๙๑ ข้อ ๙๒' sequence at line-start is NOT a section header."""
+        text = (
+            "ข้อ ๙๐\n"
+            "ให้ดำเนินการตาม\n"
+            "ข้อ ๙๑ ข้อ ๙๒ และข้อ ๙๓\n"
+            "แห่งระเบียบนี้\n"
+            "\n"
+            "ข้อ ๙๑\n"
+            "หลักเกณฑ์การดำเนินงาน\n"
+        )
+        sections = _parse_sections(text)
+        numbers = [s.number for s in sections]
+        assert numbers == ["90", "91"], f"Expected ['90','91'], got {numbers}"
+
+    def test_structural_header_trimmed_despite_khwam_compound(self):
+        """Fix B: 'ข้อความทั่วไป' (compound word) must NOT block structural-header trim.
+
+        Previously _LEGAL_CONTENT_MARKERS matched 'ข้อ' inside 'ข้อความ', causing
+        the trim scan to stop at 'ข้อความทั่วไป' before reaching 'หมวด ๑', so the
+        structural header was never removed.
+        """
+        from src.ingestion.law_extractor import _trim_trailing_structure
+        text = (
+            "ข้อ ๓ ให้รัฐมนตรีว่าการกระทรวงการคลัง  เป็นผู้รักษาการตามระเบียบนี้ \n"
+            "หมวด  ๑ \n"
+            "ข้อความทั่วไป"
+        )
+        trimmed = _trim_trailing_structure(text)
+        assert "หมวด  ๑" not in trimmed
+        assert "ข้อความทั่วไป" not in trimmed
+        assert "รักษาการตามระเบียบนี้" in trimmed
 
 
 # ── _split_list_para tests ──────────────────────────────────────────────────

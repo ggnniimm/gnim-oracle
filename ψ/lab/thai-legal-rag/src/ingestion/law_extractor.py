@@ -52,8 +52,16 @@ _SECTION_RE = re.compile(
     r"^((?:มาตรา|ข้อ)\s+[๐-๙\d]+(?:/[๐-๙\d]+)?)\s*\n?(.*?)(?=^(?:มาตรา|ข้อ)\s+[๐-๙\d]|\Z)",
     re.MULTILINE | re.DOTALL,
 )
-# Detect section marker at start of line (for splitting only)
-_SECTION_START_RE = re.compile(r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+", re.MULTILINE)
+# Detect section marker at start of line (for splitting only).
+# Negative lookahead excludes cross-references like "มาตรา ๑๓ หรือมาตรา ๑๔":
+# after the number, if the same line continues with หรือ/และ/ถึง/วรรค (horizontal
+# whitespace only — [^\S\n]* — so we don't cross to the next line), it's a reference,
+# not a section header.  Fixes ghost-section bug where cross-refs at line-start were
+# parsed as new section boundaries.
+_SECTION_START_RE = re.compile(
+    r"^(?:มาตรา|ข้อ)\s+[๐-๙\d]+(?:/[๐-๙\d]+)?\b(?![^\S\n]*(?:หรือ|และ|ถึง|วรรค|มาตรา|ข้อ))",
+    re.MULTILINE,
+)
 
 
 @dataclass
@@ -291,8 +299,11 @@ def _normalize_section_headers(text: str) -> str:
 _PARA_GEMINI_MIN_CHARS = 300
 
 _LIST_ITEM_RE = re.compile(r"^\([ก-ฮ๐-๙\d]+\)")
-# Detect list markers embedded anywhere in text (for already-merged paragraphs)
-_EMBEDDED_LIST_RE = re.compile(r"\([ก-ฮ๐-๙\d]+\)")
+# Detect list markers at the START OF A LINE within a (possibly multi-line) paragraph.
+# Intentionally does NOT match inline cross-references like "ตาม (๑) (๒) และ (๓)"
+# where the marker appears mid-sentence — those are references, not list items.
+# Fix issue #6: only line-start markers indicate list structure.
+_EMBEDDED_LIST_RE = re.compile(r"(?m)(?:^|\n)\s*\([ก-ฮ๐-๙\d]+\)")
 # Definition list items: "คำ" หมายความว่า / หมายถึง — treated as list items
 # Matches both ASCII quotes (") and Unicode curly quotes (\u201c\u201d).
 # Allows optional content between closing quote and หมายความว่า
@@ -403,7 +414,19 @@ def _split_list_para(para: str, prev_varak: str) -> tuple[str, str | None]:
 
 
 _CONTINUATION_RE = re.compile(
-    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|เพื่อ)"
+    # "เพื่อ" removed (issue #5): it frequently starts independent วรรค in Thai law
+    # e.g. "เพื่อให้การดำเนินงาน..." — a new legal sentence, not a continuation.
+    # "ในราชกิจจา" added: "ในราชกิจจานุเบกษา" is always a prepositional complement
+    # (e.g. "...นับแต่วันประกาศ\nในราชกิจจานุเบกษาเป็นต้นไป") — never a new วรรค.
+    # "ให้เป็นไปตาม" added: predicate clause that completes a subject sentence split by
+    # PDF blank lines (e.g. "รายละเอียด...ในหมวดนี้\nให้เป็นไปตามระเบียบ...") — never starts a วรรค.
+    # "ประกอบด้วย" added: always a hanging predicate ("consists of") completing the
+    # previous subject sentence (e.g. "ให้มีคณะกรรมการ...\nประกอบด้วย (๑)...").
+    # "จากนั้น" added: sequence connector ("after that") continuing the same provision.
+    # "นับแต่" added: temporal preposition ("counting from") never starts a new วรรค;
+    # always completes a deadline clause split by PDF word-wrap
+    # (e.g. "ภายในเจ็ดวันทำการ\nนับแต่วันประกาศ...").
+    r"^(ตาม|แต่|และ|หรือ|เว้นแต่|โดย|ซึ่ง|ที่|แห่ง|ในราชกิจจา|ให้เป็นไปตาม|ทั้งนี้|ประกอบด้วย|จากนั้น|นับแต่)"
 )
 
 # Broader continuation patterns valid only inside list-context blocks.
@@ -509,8 +532,14 @@ def _split_paragraphs(section_text: str) -> list[str]:
     - Blank-line split is used only when Gemini is unavailable or fails.
     """
     lines = section_text.strip().splitlines()
-    # Drop the label line
-    content_lines = lines[1:] if lines and _SECTION_START_RE.match(lines[0].strip()) else lines
+    # Drop the label prefix but preserve any inline content on the same line.
+    # e.g. "ข้อ ๒ ระเบียบนี้ให้ใช้บังคับ..." → keep "ระเบียบนี้ให้ใช้บังคับ..."
+    if lines and _SECTION_START_RE.match(lines[0].strip()):
+        m = _SECTION_START_RE.match(lines[0].strip())
+        inline = lines[0].strip()[m.end():].strip()
+        content_lines = ([inline] if inline else []) + lines[1:]
+    else:
+        content_lines = lines
     # Strip page headers before any splitting
     content = _strip_page_headers("\n".join(content_lines))
 
@@ -619,9 +648,28 @@ _STRUCT_PHAK_RE = re.compile(r"^ภาค(?:\s*ที่)?\s+[๐-๙\d]+\s*$")
 # หมวด is structural ONLY when standalone (no continuation text after the title)
 _STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\s*$")
 
+# Thai sentence-final words — when a line ends with one of these (optionally
+# followed by spaces/trailing whitespace), the sentence is complete and the
+# following short non-legal line is a structural heading, not a continuation.
+_SENTENCE_FINAL_RE = re.compile(
+    # เหมาะสม: sentence-final adjective ("ตามความจำเป็นและเหมาะสม")
+    # ที่สุด: superlative suffix ("มากที่สุด", "ดีที่สุด") — always ends sentence
+    # กรณี: ends "แล้วแต่กรณี" (as the case may be) — always sentence-final
+    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว|อนุโลม|กำหนด|กําหนด|เหมาะสม|ที่สุด|กรณี)\s*$"
+)
+
+# Signature/closing block markers that appear at the end of Thai law documents.
+# Everything from these markers to the end of the section text should be trimmed
+# (they belong to the document footer, not the last มาตรา/ข้อ).
+_SIGNATURE_BLOCK_RE = re.compile(
+    r"^(?:ผู้รับสนองพระราชโองการ|หมายเหตุ\s*:-|หมายเหตุ\s*:|ประกาศ\s+ณ\s+วัน|ให้ไว้\s+ณ\s+วัน)"
+)
+
 # Legal content markers — lines containing these are real legal text, not titles
 _LEGAL_CONTENT_MARKERS = re.compile(
-    r"(มาตรา|ข้อ|วรรค|พ\.ร\.บ\.|พระราชบัญญัติ|ระเบียบ|ให้|ต้อง|ห้าม|กรณี|ตาม|แห่ง)"
+    # "ข้อ" requires a following space+number to avoid matching compound words
+    # like "ข้อความ", "ข้อตกลง", "ข้อเสนอ" as false legal-content triggers.
+    r"(มาตรา|ข้อ\s+[๐-๙\d]|วรรค|พ\.ร\.บ\.|พระราชบัญญัติ|ระเบียบ|ให้|ต้อง|ห้าม|กรณี|ตาม|แห่ง)"
 )
 
 
@@ -638,12 +686,48 @@ def _trim_trailing_structure(section_text: str) -> str:
     """
     lines = section_text.splitlines()
 
+    # Fast-path: trim signature/closing block (ผู้รับสนองพระราชโองการ, หมายเหตุ :-, ประกาศ ณ).
+    # These markers only appear at the very end of a Thai law document (inside
+    # the last มาตรา/ข้อ) and must be stripped wholesale.
+    for idx, line in enumerate(lines):
+        if idx == 0:
+            continue  # never trim the label line
+        if _SIGNATURE_BLOCK_RE.match(line.strip()):
+            trimmed = "\n".join(lines[:idx]).strip()
+            if trimmed:
+                return trimmed
+            break  # degenerate: label-only section, fall through to normal trim
+
+    # Fast-path: trim trailing chapter/section header block.
+    # The bottom-up scan cannot reach structural headers (หมวด/ส่วน) when
+    # intervening chapter-title lines contain legal markers like "ให้"
+    # (e.g. "การลงโทษให้เป็นผู้ทิ้งงาน" stops the scan before reaching "หมวด ๘").
+    # Solution: scan the last 12 lines top-down for the TOPMOST standalone structural
+    # header, then trim from there (removing that header and everything below it).
+    # _STRUCT_*_RE requires the line to be ONLY the header (e.g. "หมวด ๘") so
+    # inline references like "ตามหมวด ๕ หรือหมวด ๖" are safe (they have extra text).
+    _TAIL_SCAN = 12
+    tail_start = max(1, len(lines) - _TAIL_SCAN)  # never trim the label line
+    for tail_abs in range(tail_start, len(lines)):
+        tl = lines[tail_abs].strip()
+        if (_STRUCT_CHAPTER_RE.match(tl) or _STRUCT_PART_RE.match(tl)
+                or _STRUCT_PHAK_RE.match(tl)):
+            # Found topmost structural header in tail window — trim from here
+            trimmed = "\n".join(lines[:tail_abs]).strip()
+            if trimmed:
+                return trimmed
+            break  # degenerate: structural header right after label
+
     # Scan from bottom: collect a candidate trim block.
     # The block may contain structural headers + title lines + blanks.
-    # We only trim if the block contains at least one structural header.
+    # We trim if:
+    #   (a) the block contains at least one formal structural header (หมวด/ส่วน/ภาค), OR
+    #   (b) all collected non-blank trailing lines are non-legal AND short (≤ 30 chars),
+    #       indicating a standalone topic heading between sections (common in ระเบียบ).
     # Once we find a structural header, we stop scanning upward when we
     # hit a line with legal content (to avoid eating real section text).
     found_structural = False
+    found_nonlegal_trailing = False
     trim_from = len(lines)
     i = len(lines) - 1
     while i >= 1:  # never trim the first line (section label)
@@ -668,16 +752,43 @@ def _trim_trailing_structure(section_text: str) -> str:
         if found_structural:
             break
 
-        # Non-legal line below structural header — likely a title/subtitle
-        if not _LEGAL_CONTENT_MARKERS.search(stripped):
-            trim_from = i
+        # Non-legal short line — candidate for standalone topic heading
+        # (e.g. "คณะกรรมการซื้อหรือจ้าง", "วิธีประกาศเชิญชวนทั่วไป",
+        #        "อำนาจในการสั่งจ้างงานจ้างออกแบบหรือควบคุมงานก่อสร้าง")
+        # Guards:
+        #   - list items like (๑)(ก) are content, not headers
+        #   - only mark as trailing heading if the previous content line ends
+        #     with a sentence-final word (ได้/แล้ว/ต่อไป/...) so we don't
+        #     accidentally trim word-wrapped continuations ("มีอำนาจสั่งยกเลิก")
+        # Limit 55 covers the longest known ระเบียบ topic headings (~53 chars);
+        # the _LEGAL_CONTENT_MARKERS guard prevents trimming real content.
+        # Either way: continue scanning (don't break) — a structural header
+        # above may still trigger the trim via the found_structural path.
+        if (not _LEGAL_CONTENT_MARKERS.search(stripped)
+                and len(stripped) <= 55
+                and not _LIST_ITEM_RE.match(stripped)):
+            prev_j = i - 1
+            while prev_j >= 0 and not lines[prev_j].strip():
+                prev_j -= 1
+            prev_stripped = lines[prev_j].strip() if prev_j >= 0 else ""
+            prev_is_sentence_final = bool(prev_stripped and _SENTENCE_FINAL_RE.search(prev_stripped))
+            prev_is_list_item = bool(prev_stripped and _LIST_ITEM_RE.match(prev_stripped))
+            # blank-line separator between candidate and prev content is a strong
+            # signal of a section-break heading (e.g. "การเก็บและการบันทึก" in
+            # ระเบียบ 202 is separated from real content by blank lines from OCR).
+            # _LEGAL_CONTENT_MARKERS still protects against trimming real content.
+            has_blank_sep = (prev_j < i - 1)  # at least one blank line between
+            if prev_is_sentence_final or prev_is_list_item or has_blank_sep:
+                found_nonlegal_trailing = True
+                trim_from = i
             i -= 1
             continue
 
-        # Legal content line — stop scanning
+        # Legal content line or long non-legal line — stop scanning
         break
 
-    if found_structural and trim_from < len(lines):
+    should_trim = (found_structural or found_nonlegal_trailing) and trim_from < len(lines)
+    if should_trim:
         # Also trim trailing blank lines before the structural block
         while trim_from > 1 and not lines[trim_from - 1].strip():
             trim_from -= 1
