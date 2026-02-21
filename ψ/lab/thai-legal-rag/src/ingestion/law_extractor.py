@@ -652,7 +652,10 @@ _STRUCT_CHAPTER_RE = re.compile(r"^หมวด(?:\s*ที่)?\s+[๐-๙\d]+\
 # followed by spaces/trailing whitespace), the sentence is complete and the
 # following short non-legal line is a structural heading, not a continuation.
 _SENTENCE_FINAL_RE = re.compile(
-    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว|อนุโลม|กำหนด|กําหนด)\s*$"
+    # เหมาะสม: sentence-final adjective ("ตามความจำเป็นและเหมาะสม")
+    # ที่สุด: superlative suffix ("มากที่สุด", "ดีที่สุด") — always ends sentence
+    # กรณี: ends "แล้วแต่กรณี" (as the case may be) — always sentence-final
+    r"(?:ได้|แล้ว|ต่อไป|ต่อไปได้|ไป|ไว้|นั้น|นี้|ด้วย|เท่านั้น|ทันที|โดยเร็ว|อนุโลม|กำหนด|กําหนด|เหมาะสม|ที่สุด|กรณี)\s*$"
 )
 
 # Signature/closing block markers that appear at the end of Thai law documents.
@@ -750,16 +753,19 @@ def _trim_trailing_structure(section_text: str) -> str:
             break
 
         # Non-legal short line — candidate for standalone topic heading
-        # (e.g. "คณะกรรมการซื้อหรือจ้าง", "วิธีประกาศเชิญชวนทั่วไป")
+        # (e.g. "คณะกรรมการซื้อหรือจ้าง", "วิธีประกาศเชิญชวนทั่วไป",
+        #        "อำนาจในการสั่งจ้างงานจ้างออกแบบหรือควบคุมงานก่อสร้าง")
         # Guards:
         #   - list items like (๑)(ก) are content, not headers
         #   - only mark as trailing heading if the previous content line ends
         #     with a sentence-final word (ได้/แล้ว/ต่อไป/...) so we don't
         #     accidentally trim word-wrapped continuations ("มีอำนาจสั่งยกเลิก")
+        # Limit 55 covers the longest known ระเบียบ topic headings (~53 chars);
+        # the _LEGAL_CONTENT_MARKERS guard prevents trimming real content.
         # Either way: continue scanning (don't break) — a structural header
         # above may still trigger the trim via the found_structural path.
         if (not _LEGAL_CONTENT_MARKERS.search(stripped)
-                and len(stripped) <= 30
+                and len(stripped) <= 55
                 and not _LIST_ITEM_RE.match(stripped)):
             prev_j = i - 1
             while prev_j >= 0 and not lines[prev_j].strip():
@@ -767,7 +773,12 @@ def _trim_trailing_structure(section_text: str) -> str:
             prev_stripped = lines[prev_j].strip() if prev_j >= 0 else ""
             prev_is_sentence_final = bool(prev_stripped and _SENTENCE_FINAL_RE.search(prev_stripped))
             prev_is_list_item = bool(prev_stripped and _LIST_ITEM_RE.match(prev_stripped))
-            if prev_is_sentence_final or prev_is_list_item:
+            # blank-line separator between candidate and prev content is a strong
+            # signal of a section-break heading (e.g. "การเก็บและการบันทึก" in
+            # ระเบียบ 202 is separated from real content by blank lines from OCR).
+            # _LEGAL_CONTENT_MARKERS still protects against trimming real content.
+            has_blank_sep = (prev_j < i - 1)  # at least one blank line between
+            if prev_is_sentence_final or prev_is_list_item or has_blank_sep:
                 found_nonlegal_trailing = True
                 trim_from = i
             i -= 1
