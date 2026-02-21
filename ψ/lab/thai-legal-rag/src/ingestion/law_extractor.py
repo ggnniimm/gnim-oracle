@@ -662,7 +662,7 @@ _SENTENCE_FINAL_RE = re.compile(
 # Everything from these markers to the end of the section text should be trimmed
 # (they belong to the document footer, not the last มาตรา/ข้อ).
 _SIGNATURE_BLOCK_RE = re.compile(
-    r"^(?:ผู้รับสนองพระราชโองการ|หมายเหตุ\s*:-|หมายเหตุ\s*:|ประกาศ\s+ณ\s+วัน)"
+    r"^(?:ผู้รับสนองพระราชโองการ|หมายเหตุ\s*:-|หมายเหตุ\s*:|ประกาศ\s+ณ\s+วัน|ให้ไว้\s+ณ\s+วัน)"
 )
 
 # Legal content markers — lines containing these are real legal text, not titles
