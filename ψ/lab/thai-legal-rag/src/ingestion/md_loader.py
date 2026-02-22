@@ -111,17 +111,19 @@ def load_md_file(path: Path | str) -> list[Chunk]:
     text = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(text)
 
-    # Normalize metadata keys to what the pipeline expects
+    # Normalize metadata keys to what the pipeline expects.
+    # Supports both legacy format (source_file, type, ref_number, law_section)
+    # and OCR pipeline format (original_filename, doc_type, doc_number, laws_referenced).
     base_meta = {
         "source_drive_id": meta.get("file_id", ""),
-        "source_name": meta.get("source_file", path.name),
+        "source_name": meta.get("source_file") or meta.get("original_filename") or path.name,
         "source_url": meta.get("file_url", ""),
-        "category": meta.get("type", "ข้อหารือ กวจ."),
+        "category": meta.get("type") or meta.get("doc_type") or "ข้อหารือ กวจ.",
         "date": str(meta.get("date", "")),
-        "ref_number": meta.get("ref_number", ""),
+        "ref_number": meta.get("ref_number") or meta.get("doc_number") or "",
         "topic": meta.get("topic", ""),
         "tags": meta.get("tags", []),
-        "law_section": meta.get("law_section", []),
+        "law_section": meta.get("law_section") or meta.get("laws_referenced") or [],
     }
 
     return _section_chunks(body, base_meta)
