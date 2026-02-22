@@ -3,6 +3,7 @@ Query expansion for Thai legal search.
 Uses Gemini Flash to generate relevant legal keywords from a user query.
 """
 import logging
+import re
 
 from google import genai
 from google.genai import types as genai_types
@@ -37,6 +38,21 @@ _EXPAND_PROMPT = """\
 - ชื่อหน่วยงาน (กรมบัญชีกลาง, ศาลปกครอง, สำนักงานอัยการสูงสุด)
 - ขั้นตอนและกระบวนการที่เกี่ยวข้อง
 ตอบ JSON เท่านั้น ห้ามมีข้อความอื่น:"""
+
+
+# Patterns that indicate a specific, targeted query — expansion hurts precision
+_SPECIFIC_PATTERNS = [
+    r"ข้อ\s*[\d๐-๙]+",            # ข้อ 11, ข้อ ๑๑
+    r"มาตรา\s*[\d๐-๙]+",          # มาตรา 60, มาตรา ๖๐
+    r"วรรค\s*(หนึ่ง|สอง|สาม|สี่|ห้า|\d+)",  # วรรคหนึ่ง, วรรค 2
+    r"กฎกระทรวง.*(ฉบับที่|พ\.ศ\.)",          # กฎกระทรวงฉบับที่ 2 / พ.ศ. 2560
+    r"หมวด\s*[\d๐-๙]+",           # หมวด 3
+]
+
+
+def is_specific_query(query: str) -> bool:
+    """Return True if query targets a specific provision — expansion hurts precision."""
+    return any(re.search(p, query) for p in _SPECIFIC_PATTERNS)
 
 
 def expand_query(query: str) -> list[str]:

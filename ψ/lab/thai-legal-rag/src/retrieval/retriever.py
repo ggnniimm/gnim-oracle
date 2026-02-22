@@ -7,7 +7,7 @@ import asyncio
 import logging
 
 from src.indexing.manager import IndexManager
-from src.retrieval.query_expand import expand_query
+from src.retrieval.query_expand import expand_query, is_specific_query
 from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K
 
 logger = logging.getLogger(__name__)
@@ -28,10 +28,12 @@ class Retriever:
         Async retrieval with optional query expansion.
         Returns {"faiss": [...], "lightrag": [...]}.
         """
-        if expand:
+        if expand and not is_specific_query(query):
             queries = expand_query(query)
             logger.debug(f"Expanded to {len(queries)} queries")
         else:
+            if expand and is_specific_query(query):
+                logger.debug(f"Skipping expansion — specific query detected: {query!r}")
             queries = [query]
 
         # Run all queries in parallel, collect all results
