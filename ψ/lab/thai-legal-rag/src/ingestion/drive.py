@@ -51,18 +51,8 @@ def _get_credentials() -> Credentials:
             flow = InstalledAppFlow.from_client_secrets_file(
                 _CREDENTIALS_PATH, GOOGLE_DRIVE_SCOPES
             )
-            # Headless auth: print URL → user opens in browser → pastes code back
-            flow.redirect_uri = "urn:ietf:wg:oauth:2.0:oob"
-            auth_url, _ = flow.authorization_url(prompt="consent")
-            print("\n" + "="*60)
-            print("Google Drive Authentication Required")
-            print("="*60)
-            print(f"\n1. Open this URL in your browser:\n\n   {auth_url}\n")
-            print("2. Sign in and grant access")
-            print("3. Copy the authorization code and paste below\n")
-            code = input("Authorization code: ").strip()
-            flow.fetch_token(code=code)
-            creds = flow.credentials
+            # Opens browser, starts local server to catch redirect automatically
+            creds = flow.run_local_server(port=0, prompt="consent")
 
         Path(_TOKEN_PATH).write_text(creds.to_json())
 
