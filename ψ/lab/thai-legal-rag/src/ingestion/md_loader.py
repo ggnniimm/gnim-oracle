@@ -30,10 +30,18 @@ from src.ingestion.chunker import ThaiTextSplitter, Chunk, CHUNK_SIZE, CHUNK_OVE
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+# Old format: YAML keys directly (no --- delimiters), blank line, then # heading
+_OLD_FRONTMATTER_RE = re.compile(r"^((?:[^\n]+\n)+)\n(#)", re.DOTALL)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
-    """Split YAML frontmatter from body. Returns (meta, body)."""
+    """Split YAML frontmatter from body. Returns (meta, body).
+
+    Supports two formats:
+      1. Standard: ---\\nkey: val\\n---\\n body
+      2. Legacy:   key: val\\n\\n# Title body (no --- delimiters)
+    """
+    # Format 1: standard ---...--- frontmatter
     m = _FRONTMATTER_RE.match(text)
     if m:
         try:
@@ -41,10 +49,20 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
         except yaml.YAMLError:
             meta = {}
         body = text[m.end():]
-    else:
-        meta = {}
-        body = text
-    return meta, body
+        return meta, body
+
+    # Format 2: legacy — YAML lines followed by blank line + # heading
+    m2 = _OLD_FRONTMATTER_RE.match(text)
+    if m2:
+        try:
+            meta = yaml.safe_load(m2.group(1)) or {}
+        except yaml.YAMLError:
+            meta = {}
+        # body starts at the # character
+        body = text[m2.start(2):]
+        return meta, body
+
+    return {}, text
 
 
 def _section_chunks(body: str, base_meta: dict) -> list[Chunk]:
