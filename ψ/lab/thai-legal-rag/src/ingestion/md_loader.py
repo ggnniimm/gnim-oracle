@@ -30,8 +30,12 @@ from src.ingestion.chunker import ThaiTextSplitter, Chunk, CHUNK_SIZE, CHUNK_OVE
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
+# Remove ASCII control characters (except tab \x09, newline \x0a, carriage return \x0d)
+_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 # Old format: YAML keys directly (no --- delimiters), blank line, then # heading
 _OLD_FRONTMATTER_RE = re.compile(r"^((?:[^\n]+\n)+)\n(#)", re.DOTALL)
+# Hybrid format: YAML keys with no opening ---, only a closing --- line
+_HYBRID_FRONTMATTER_RE = re.compile(r"^((?:[^\n]+\n)+)---\s*\n", re.DOTALL)
 
 
 def _parse_frontmatter(text: str) -> tuple[dict, str]:
@@ -45,21 +49,34 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     m = _FRONTMATTER_RE.match(text)
     if m:
         try:
-            meta = yaml.safe_load(m.group(1)) or {}
+            yaml_block = _CONTROL_CHARS_RE.sub("", m.group(1))
+            meta = yaml.safe_load(yaml_block) or {}
         except yaml.YAMLError:
             meta = {}
         body = text[m.end():]
         return meta, body
 
-    # Format 2: legacy — YAML lines followed by blank line + # heading
-    m2 = _OLD_FRONTMATTER_RE.match(text)
+    # Format 2: hybrid — YAML lines then closing --- (no opening ---)
+    m2 = _HYBRID_FRONTMATTER_RE.match(text)
     if m2:
         try:
-            meta = yaml.safe_load(m2.group(1)) or {}
+            yaml_block = _CONTROL_CHARS_RE.sub("", m2.group(1))
+            meta = yaml.safe_load(yaml_block) or {}
+        except yaml.YAMLError:
+            meta = {}
+        body = text[m2.end():]
+        return meta, body
+
+    # Format 3: legacy — YAML lines followed by blank line + # heading
+    m3 = _OLD_FRONTMATTER_RE.match(text)
+    if m3:
+        try:
+            yaml_block = _CONTROL_CHARS_RE.sub("", m3.group(1))
+            meta = yaml.safe_load(yaml_block) or {}
         except yaml.YAMLError:
             meta = {}
         # body starts at the # character
-        body = text[m2.start(2):]
+        body = text[m3.start(2):]
         return meta, body
 
     return {}, text
