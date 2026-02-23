@@ -44,6 +44,7 @@ class Retriever:
 
         # Merge: deduplicate by text content
         merged_faiss: dict[str, dict] = {}
+        merged_bm25: dict[str, dict] = {}
         merged_lightrag: dict[str, dict] = {}
 
         for result_set in all_results:
@@ -51,6 +52,10 @@ class Retriever:
                 key = item.get("text", "")[:100]
                 if key not in merged_faiss or item["score"] > merged_faiss[key]["score"]:
                     merged_faiss[key] = item
+            for item in result_set.get("bm25", []):
+                key = item.get("text", "")[:100]
+                if key not in merged_bm25 or item["score"] > merged_bm25[key]["score"]:
+                    merged_bm25[key] = item
             for item in result_set.get("lightrag", []):
                 key = item.get("text", "")[:100]
                 if key not in merged_lightrag or item["score"] > merged_lightrag[key]["score"]:
@@ -58,6 +63,7 @@ class Retriever:
 
         return {
             "faiss": list(merged_faiss.values()),
+            "bm25": list(merged_bm25.values()),
             "lightrag": list(merged_lightrag.values()),
         }
 

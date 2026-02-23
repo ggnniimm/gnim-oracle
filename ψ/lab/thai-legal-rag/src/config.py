@@ -33,13 +33,14 @@ DRIVE_FOLDER_IDS: dict[str, str] = {
 BASE_DIR = Path(os.getenv("THAI_RAG_DATA_DIR", "/tmp/thai-legal-rag"))
 FAISS_DIR = BASE_DIR / "faiss_index"
 LIGHTRAG_DIR = BASE_DIR / "lightrag_index"
+BM25_DIR = BASE_DIR / "bm25_index"
 DEDUP_DB = BASE_DIR / "dedup.db"
 OCR_CACHE_DIR = BASE_DIR / "ocr_cache"
 MD_BACKUP_DIR = BASE_DIR / "md_backup"
 FAILED_LOG_DIR = BASE_DIR / "failed_logs"
 
 # Create dirs on import
-for _d in [FAISS_DIR, LIGHTRAG_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
+for _d in [FAISS_DIR, LIGHTRAG_DIR, BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # --- Models ---
@@ -54,6 +55,8 @@ CHUNK_OVERLAP = 100
 # --- Retrieval ---
 FAISS_TOP_K = 10
 LIGHTRAG_TOP_K = 10
+BM25_TOP_K = 10
+BM25_WEIGHT = 0.7  # lower than FAISS=1.0 (keyword supplements, not replaces)
 RERANK_TOP_K = 5
 
 # --- OCR ---

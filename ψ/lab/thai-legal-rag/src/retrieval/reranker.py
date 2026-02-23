@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 _SOURCE_WEIGHTS = {
     "faiss": 1.0,
     "lightrag": 0.9,  # slightly lower — graph responses are broader
+    "bm25": 0.7,      # keyword match supplements semantic
 }
 
 
