@@ -80,6 +80,8 @@ def list_files(folder_id: str, page_size: int = 200) -> list[dict]:
                 pageSize=page_size,
                 fields="nextPageToken, files(id, name, mimeType)",
                 pageToken=page_token,
+                supportsAllDrives=True,
+                includeItemsFromAllDrives=True,
             )
             .execute()
         )
