@@ -56,6 +56,20 @@ def load_retry_ids(path: Path) -> set[str]:
     return set(line.strip() for line in path.read_text().splitlines() if line.strip())
 
 
+def _metadata_prefix(meta: dict) -> str:
+    """Build a searchable prefix from document metadata fields not present in chunk text."""
+    parts = []
+    if meta.get("ref_number"):
+        parts.append(str(meta["ref_number"]))
+    if meta.get("date"):
+        parts.append(str(meta["date"]))
+    if meta.get("category"):
+        parts.append(str(meta["category"]))
+    if not parts:
+        return ""
+    return "[" + " | ".join(parts) + "]\n\n"
+
+
 def main():
     args = parse_args()
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -126,9 +140,11 @@ def main():
             new_chunks = []
             new_metas = []
             for chunk in chunks:
-                if is_indexed(chunk.text):
+                prefix = _metadata_prefix(chunk.metadata)
+                enriched_text = prefix + chunk.text if prefix else chunk.text
+                if is_indexed(enriched_text):
                     continue
-                new_chunks.append(chunk.text)
+                new_chunks.append(enriched_text)
                 new_metas.append(chunk.metadata)
 
             if not new_chunks:
