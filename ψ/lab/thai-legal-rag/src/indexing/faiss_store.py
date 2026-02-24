@@ -106,6 +106,8 @@ class FAISSStore:
         for score, idx in zip(scores[0], indices[0]):
             if idx == -1:
                 continue
+            if idx >= len(self._metadata):  # orphan vector (metadata removed, FAISS can't delete)
+                continue
             item = dict(self._index_meta(idx))
             item["score"] = float(score)
             item["source"] = "faiss"
