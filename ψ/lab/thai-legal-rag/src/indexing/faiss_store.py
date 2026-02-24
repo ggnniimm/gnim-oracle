@@ -66,7 +66,13 @@ class FAISSStore:
             self._index = faiss.read_index(str(_INDEX_FILE))
             with open(_META_FILE, "rb") as f:
                 self._metadata = pickle.load(f)
-            logger.info(f"Loaded FAISS index: {self._index.ntotal} vectors")
+            logger.info(f"Loaded FAISS index: {self._index.ntotal} vectors, {len(self._metadata)} metadata entries")
+            if self._index.ntotal != len(self._metadata):
+                logger.warning(
+                    f"FAISS alignment mismatch: index has {self._index.ntotal} vectors "
+                    f"but metadata has {len(self._metadata)} entries. "
+                    f"Search may return orphan vectors."
+                )
         else:
             self._index = faiss.IndexFlatIP(EMBEDDING_DIM)
             self._metadata = []
