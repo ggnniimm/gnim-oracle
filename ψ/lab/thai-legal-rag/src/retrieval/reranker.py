@@ -49,11 +49,30 @@ def rerank(results: dict[str, list[dict]], top_k: int = RERANK_TOP_K) -> list[di
         if text_key not in seen:
             seen.add(text_key)
             deduped.append(item)
-        if len(deduped) >= top_k * 3:
+        if len(deduped) >= top_k * 5:
             break  # Early exit after collecting enough candidates
 
-    result = deduped[:top_k]
+    top = deduped[:top_k]
+
+    # Source injection: if rank-1 source appears only once in top-K,
+    # its title chunk ranked high but content chunks didn't.
+    # Inject up to 3 more chunks from the same source from the candidate pool.
+    if top:
+        top_source = top[0].get("source_name") or top[0].get("filename", "")
+        top_source_count = sum(
+            1 for item in top
+            if (item.get("source_name") or item.get("filename", "")) == top_source
+        )
+        if top_source_count == 1 and top_source:
+            extras = [
+                item for item in deduped[top_k:]
+                if (item.get("source_name") or item.get("filename", "")) == top_source
+            ][:3]
+            if extras:
+                top = top + extras
+                logger.debug(f"Source injection: added {len(extras)} chunks from '{top_source}'")
+
     logger.debug(
-        f"Reranked {len(all_items)} items → {len(deduped)} deduped → top {len(result)}"
+        f"Reranked {len(all_items)} items → {len(deduped)} deduped → top {len(top)}"
     )
-    return result
+    return top

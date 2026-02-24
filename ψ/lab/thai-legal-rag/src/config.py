@@ -53,11 +53,11 @@ CHUNK_SIZE = 400       # tokens / chars
 CHUNK_OVERLAP = 100
 
 # --- Retrieval ---
-FAISS_TOP_K = 10
+FAISS_TOP_K = 40
 LIGHTRAG_TOP_K = 10
-BM25_TOP_K = 10
-BM25_WEIGHT = 0.7  # lower than FAISS=1.0 (keyword supplements, not replaces)
-RERANK_TOP_K = 5
+BM25_TOP_K = 20
+BM25_WEIGHT = 0.9  # keyword match nearly equals semantic — high recall
+RERANK_TOP_K = 15
 
 # --- OCR ---
 OCR_MIN_CHARS_PER_PAGE = 50   # pages with fewer chars will be force-OCR'd
