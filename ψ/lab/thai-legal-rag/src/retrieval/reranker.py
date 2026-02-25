@@ -6,15 +6,15 @@ from __future__ import annotations
 
 import logging
 
-from src.config import RERANK_TOP_K
+from src.config import RERANK_TOP_K, BM25_WEIGHT
 
 logger = logging.getLogger(__name__)
 
 # Weight for each source when combining scores
 _SOURCE_WEIGHTS = {
     "faiss": 1.0,
-    "lightrag": 0.9,  # slightly lower — graph responses are broader
-    "bm25": 0.7,      # keyword match supplements semantic
+    "lightrag": 0.9,   # slightly lower — graph responses are broader
+    "bm25": BM25_WEIGHT,  # from config (0.9) — keyword match nearly equals semantic
 }
 
 

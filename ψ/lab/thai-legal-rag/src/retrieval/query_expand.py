@@ -47,6 +47,7 @@ _SPECIFIC_PATTERNS = [
     r"วรรค\s*(หนึ่ง|สอง|สาม|สี่|ห้า|\d+)",  # วรรคหนึ่ง, วรรค 2
     r"กฎกระทรวง.*(ฉบับที่|พ\.ศ\.)",          # กฎกระทรวงฉบับที่ 2 / พ.ศ. 2560
     r"หมวด\s*[\d๐-๙]+",           # หมวด 3
+    r"\b\d{4,}\b",                 # bare 4+ digit number = doc ID lookup (e.g. 5529, 51349)
 ]
 
 
@@ -80,6 +81,7 @@ def expand_query(query: str) -> list[str]:
         keywords = json.loads(text)
         if isinstance(keywords, list):
             result = [query] + [k for k in keywords if isinstance(k, str)]
+            result = result[:6]  # cap at 6 queries — more causes generic terms to dominate
             logger.debug(f"Expanded '{query}' → {len(result)} terms")
             return result
     except Exception as e:

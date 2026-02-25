@@ -28,11 +28,12 @@ class Retriever:
         Async retrieval with optional query expansion.
         Returns {"faiss": [...], "lightrag": [...]}.
         """
-        if expand and not is_specific_query(query):
+        specific = is_specific_query(query)
+        if expand and not specific:
             queries = expand_query(query)
             logger.debug(f"Expanded to {len(queries)} queries")
         else:
-            if expand and is_specific_query(query):
+            if expand and specific:
                 logger.debug(f"Skipping expansion — specific query detected: {query!r}")
             queries = [query]
 
@@ -60,6 +61,12 @@ class Retriever:
                 key = item.get("text", "")[:100]
                 if key not in merged_lightrag or item["score"] > merged_lightrag[key]["score"]:
                     merged_lightrag[key] = item
+
+        if specific:
+            # For ID/provision lookups, BM25 exact match is authoritative.
+            # FAISS embeddings of bare numbers return generic semantic matches that add noise.
+            logger.debug(f"Specific query — returning BM25 only (skipping FAISS)")
+            return {"faiss": [], "bm25": list(merged_bm25.values()), "lightrag": []}
 
         return {
             "faiss": list(merged_faiss.values()),

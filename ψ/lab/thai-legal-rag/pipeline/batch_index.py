@@ -56,11 +56,25 @@ def load_retry_ids(path: Path) -> set[str]:
     return set(line.strip() for line in path.read_text().splitlines() if line.strip())
 
 
+_THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def _normalize_numerals(text: str) -> str:
+    """Convert Thai numerals to Arabic so BM25 can match doc numbers."""
+    return text.translate(_THAI_DIGIT_MAP)
+
+
 def _metadata_prefix(meta: dict) -> str:
     """Build a searchable prefix from document metadata fields not present in chunk text."""
     parts = []
     if meta.get("ref_number"):
-        parts.append(str(meta["ref_number"]))
+        ref = _normalize_numerals(str(meta["ref_number"]))
+        parts.append(ref)
+        # Also add bare numeric suffix (after last '/') so "5529" matches "0405.2/5529"
+        if "/" in ref:
+            suffix = ref.rsplit("/", 1)[-1].strip()
+            if suffix.isdigit():
+                parts.append(suffix)
     if meta.get("date"):
         parts.append(str(meta["date"]))
     if meta.get("category"):
