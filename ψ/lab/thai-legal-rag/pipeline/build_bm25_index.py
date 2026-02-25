@@ -6,8 +6,10 @@ from tqdm import tqdm
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.config import FAISS_DIR
+from src.config import FAISS_DIR, BM25_DIR
 from src.indexing.bm25_store import BM25Store
+
+_BM25_FILE = BM25_DIR / "bm25.pkl"
 
 
 def main():
@@ -18,6 +20,11 @@ def main():
 
     meta = pickle.loads(meta_path.read_bytes())
     print(f"Building BM25 from {len(meta)} existing chunks...")
+
+    # Wipe existing index so we rebuild from scratch (not append)
+    if _BM25_FILE.exists():
+        _BM25_FILE.unlink()
+        print("Wiped existing BM25 index.")
 
     store = BM25Store()
     # Extract text from copies to avoid mutating the loaded list
