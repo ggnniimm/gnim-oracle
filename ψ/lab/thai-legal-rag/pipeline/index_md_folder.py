@@ -19,6 +19,31 @@ from src.ingestion.md_loader import load_md_file
 from src.ingestion.dedup import is_indexed, mark_indexed, stats as dedup_stats
 from src.indexing.manager import IndexManager
 
+_THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def _normalize_numerals(text: str) -> str:
+    return text.translate(_THAI_DIGIT_MAP)
+
+
+def _metadata_prefix(meta: dict) -> str:
+    """Same prefix logic as batch_index.py — keeps dedup hashes consistent."""
+    parts = []
+    if meta.get("ref_number"):
+        ref = _normalize_numerals(str(meta["ref_number"]))
+        parts.append(ref)
+        if "/" in ref:
+            suffix = ref.rsplit("/", 1)[-1].strip()
+            if suffix.isdigit():
+                parts.append(suffix)
+    if meta.get("date"):
+        parts.append(str(meta["date"]))
+    if meta.get("category"):
+        parts.append(str(meta["category"]))
+    if not parts:
+        return ""
+    return "[" + " | ".join(parts) + "]\n\n"
+
 
 def parse_args():
     p = argparse.ArgumentParser(description="Index MD files into FAISS + LightRAG")
@@ -50,16 +75,19 @@ def main():
         new_texts, new_metas = [], []
 
         for chunk in chunks:
-            if is_indexed(chunk.text):
+            prefix = _metadata_prefix(chunk.metadata)
+            enriched = prefix + chunk.text if prefix else chunk.text
+            if is_indexed(enriched):
                 total_skip += 1
                 continue
-            new_texts.append(chunk.text)
+            new_texts.append(enriched)
             new_metas.append(chunk.metadata)
 
         if new_texts:
             index.add_batch(new_texts, new_metas)
+            source_id = chunks[0].metadata.get("source_drive_id") or md_file.stem
             for t in new_texts:
-                mark_indexed(t, source_id=md_file.stem)
+                mark_indexed(t, source_id=source_id)
             total_new += len(new_texts)
 
     index.save()
