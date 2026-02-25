@@ -55,7 +55,7 @@ CHUNK_OVERLAP = 100
 # --- Retrieval ---
 FAISS_TOP_K = 40
 LIGHTRAG_TOP_K = 10
-BM25_TOP_K = 20
+BM25_TOP_K = 40
 BM25_WEIGHT = 0.9  # keyword match nearly equals semantic — high recall
 RERANK_TOP_K = 15
 

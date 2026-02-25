@@ -80,9 +80,12 @@ def expand_query(query: str) -> list[str]:
         import json
         keywords = json.loads(text)
         if isinstance(keywords, list):
-            result = [query] + [k for k in keywords if isinstance(k, str)]
+            # Filter: skip keywords that are full law/regulation names (>30 chars) —
+            # they match title chunks of every document and drown out content chunks.
+            filtered = [k for k in keywords if isinstance(k, str) and len(k) <= 30]
+            result = [query] + filtered
             result = result[:6]  # cap at 6 queries — more causes generic terms to dominate
-            logger.debug(f"Expanded '{query}' → {len(result)} terms")
+            logger.debug(f"Expanded '{query}' → {len(result)} terms (filtered {len(keywords)-len(filtered)} long terms)")
             return result
     except Exception as e:
         logger.warning(f"Query expansion failed: {e}")
