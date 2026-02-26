@@ -83,6 +83,49 @@ RAG แก้ปัญหาหลักของ LLM 3 อย่าง:
 
 ---
 
+## Embedding Gap
+
+**ระยะห่างระหว่าง query vector กับ chunk vector ที่ควรจะ relevant แต่อยู่ไกลกันใน embedding space**
+
+### สาเหตุ
+
+- **Domain gap** — model ไม่ถูก train บน domain นั้น
+- **Vocabulary dilution** — chunk มีคำหลาย cluster → embedding = weighted average → ลงจุดกลางๆ ไม่ชนะ cluster ไหน
+- **Perspective gap** — query กว้าง (open-ended) / chunk เล่าจากมุมเฉพาะ
+- **Corpus imbalance** — concept A ปรากฏ 500x, concept B ปรากฏ 5x → embedding space โน้มไปหา A
+
+### ตัวอย่างจาก thai-legal-rag
+
+Query "คณะกรรมการตรวจรับพัสดุมีหน้าที่อะไรบ้าง" ไม่ดึง กวจ. 38381 เพราะ:
+- chunk 38381 มีคำกลุ่ม "สัญญา" 6-7 คำ vs "หน้าที่" 2-3 คำ → embedding ลงใน "บริหารสัญญา" cluster
+- ไม่ใช่แค่ "บอกเลิกสัญญา" ดึง แต่ทั้ง 4 กรณี (แก้ไขสัญญา, ขยายเวลา, งดลดค่าปรับ, บอกเลิก) ดึงพร้อมกันไปทิศเดียวกัน
+
+### วิธีแก้
+
+| วิธี | คำอธิบาย | เหมาะกับ |
+|------|---------|---------|
+| **Retrieval Anchor** | เพิ่ม chunk สั้นๆ ที่ใช้ vocabulary ตรง query เป็น bridge | เอกสารที่รู้แน่ว่ามี gap |
+| **Query Expansion** | generate variant queries ก่อน retrieve | gap เกิดจาก vocabulary |
+| **Cross-Encoder** | model อ่าน query+chunk พร้อมกัน ไม่ขึ้นกับ embedding space | scale ใหญ่, gap เกิดบ่อย |
+
+**Invariant**: Short, focused chunk → dense embedding → better ranking. ดูรายละเอียด: `2026-02-26_embedding-gap-retrieval-anchor.md`
+
+---
+
+## Bi-Encoder vs Cross-Encoder
+
+| | Bi-Encoder | Cross-Encoder |
+|---|---|---|
+| Input | embed(query), embed(chunk) แยกกัน | model(query [SEP] chunk) พร้อมกัน |
+| Scoring | cosine_similarity(Q, C) | direct relevance score |
+| Speed | เร็วมาก (pre-compute chunk vectors) | ช้ากว่า (ต้อง forward pass ทุก pair) |
+| Accuracy | ต่ำกว่าสำหรับ complex query | สูงกว่ามาก |
+| ใช้ทำอะไร | Stage 1: retrieve candidates (top-K) | Stage 2: rerank candidates |
+
+Cross-encoder ไม่ได้แทน bi-encoder แต่ใช้เป็น **stage 2 reranker** หลังจาก bi-encoder ดึง top-80 มาแล้ว
+
+---
+
 ## When to Use RAG?
 
 | สถานการณ์ | วิธีที่ดีที่สุด |
