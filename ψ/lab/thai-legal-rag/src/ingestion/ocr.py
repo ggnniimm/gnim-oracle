@@ -416,6 +416,39 @@ def _cleanup(client: genai.Client, uploaded_file) -> None:
         pass
 
 
+_ANCHOR_PROMPT = """\
+จากเอกสารกฎหมายไทยต่อไปนี้ ให้สร้างบทสรุปสำหรับสืบค้น (retrieval summary) ดังนี้:
+
+บรรทัดที่ 1-2: คำสำคัญ 15-20 คำ คั่นด้วยช่องว่าง (เช่น ชื่อเรื่อง เลขที่หนังสือ มาตรา ข้อกฎหมาย หลักการสำคัญ)
+บรรทัดที่ 3-5: สรุปหลักการหรือข้อวินิจฉัยสำคัญ 2-3 ประโยค ใช้ภาษาที่เหมาะสำหรับการค้นหา
+
+ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text เท่านั้น
+
+---
+{content}
+"""
+
+
+def generate_anchor(text: str) -> str:
+    """Generate a retrieval anchor (บทสรุปสำหรับสืบค้น) from extracted markdown.
+
+    Sends truncated text to Gemini and returns keyword-dense summary for FAISS retrieval.
+    Returns empty string on failure (non-fatal — OCR result is still valid without anchor).
+    """
+    truncated = text[:4000]
+    prompt = _ANCHOR_PROMPT.format(content=truncated)
+    try:
+        client = _client()
+        response = client.models.generate_content(
+            model=GEMINI_FLASH_MODEL,
+            contents=[prompt],
+        )
+        return response.text.strip()
+    except Exception as e:
+        logger.warning(f"Anchor generation failed (non-fatal): {e}")
+        return ""
+
+
 def classify(pdf_bytes: bytes) -> dict:
     """Phase 1: Classify document type."""
     client = _client()
@@ -524,6 +557,12 @@ def pdf_to_markdown(
         "status": "active",
         "status_note": "unverified",
     })
+
+    # Generate retrieval anchor
+    anchor = generate_anchor(text)
+    if anchor:
+        text += f"\n\n## บทสรุปสำหรับสืบค้น\n\n{anchor}"
+        logger.info(f"Generated retrieval anchor for '{filename}'")
 
     result = {
         "text": text,
