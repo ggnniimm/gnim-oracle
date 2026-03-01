@@ -59,7 +59,7 @@ BM25_TOP_K = 40
 BM25_WEIGHT = 0.9  # keyword match nearly equals semantic — high recall
 RERANK_TOP_K = 15
 MMR_LAMBDA = 0.7   # 1.0 = pure relevance, 0.0 = pure diversity
-MMR_INJECT_EXTRAS = 2  # after MMR, inject this many extra chunks per retrieved source
+MMR_INJECT_EXTRAS = 4  # after MMR, inject this many extra chunks per retrieved source
 
 # --- OCR ---
 OCR_MIN_CHARS_PER_PAGE = 50   # pages with fewer chars will be force-OCR'd
