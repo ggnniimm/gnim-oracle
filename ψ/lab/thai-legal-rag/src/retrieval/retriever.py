@@ -8,7 +8,7 @@ import logging
 
 from src.indexing.manager import IndexManager
 from src.retrieval.query_expand import expand_query, is_specific_query
-from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K
+from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K, ORIGINAL_QUERY_BOOST
 
 logger = logging.getLogger(__name__)
 
@@ -43,21 +43,30 @@ class Retriever:
 
         all_results = await asyncio.gather(*[_query_one(q) for q in queries])
 
-        # Merge: deduplicate by text content
+        # Merge: deduplicate by text content.
+        # Boost scores from the original query (index 0) so it dominates
+        # over noise from expanded queries after reranker normalization.
         merged_faiss: dict[str, dict] = {}
         merged_bm25: dict[str, dict] = {}
         merged_lightrag: dict[str, dict] = {}
 
-        for result_set in all_results:
+        for qi, result_set in enumerate(all_results):
+            boost = ORIGINAL_QUERY_BOOST if qi == 0 else 1.0
             for item in result_set.get("faiss", []):
+                item = dict(item)
+                item["score"] = item.get("score", 0) * boost
                 key = item.get("text", "")[:100]
                 if key not in merged_faiss or item["score"] > merged_faiss[key]["score"]:
                     merged_faiss[key] = item
             for item in result_set.get("bm25", []):
+                item = dict(item)
+                item["score"] = item.get("score", 0) * boost
                 key = item.get("text", "")[:100]
                 if key not in merged_bm25 or item["score"] > merged_bm25[key]["score"]:
                     merged_bm25[key] = item
             for item in result_set.get("lightrag", []):
+                item = dict(item)
+                item["score"] = item.get("score", 0) * boost
                 key = item.get("text", "")[:100]
                 if key not in merged_lightrag or item["score"] > merged_lightrag[key]["score"]:
                     merged_lightrag[key] = item
