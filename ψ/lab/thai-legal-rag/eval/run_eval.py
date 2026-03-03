@@ -131,6 +131,7 @@ def run_case(
 
     result = check_case(case, answer, sources, generate)
     result["elapsed"] = round(time.time() - t0, 1)
+    result["full_answer"] = answer
     return result
 
 
@@ -162,6 +163,10 @@ def print_result(result: dict, verbose: bool = False):
         if verbose and result["answer_snippet"]:
             print(f"\n  {CYAN}Answer snippet:{RESET}")
             print(f"  {result['answer_snippet'][:500]}")
+
+    if verbose and result.get("full_answer"):
+        print(f"\n  {CYAN}Full answer:{RESET}")
+        print(result["full_answer"])
 
 
 def print_summary(results: list[dict]):
