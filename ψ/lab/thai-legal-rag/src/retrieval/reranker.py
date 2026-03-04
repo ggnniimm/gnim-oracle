@@ -14,7 +14,7 @@ import logging
 
 from pythainlp.tokenize import word_tokenize
 
-from src.config import BM25_WEIGHT, MMR_INJECT_EXTRAS, MMR_LAMBDA, RERANK_TOP_K
+from src.config import BM25_WEIGHT, MMR_INJECT_EXTRAS, MMR_LAMBDA, RERANK_TOP_K, RECENCY_BOOST
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +79,15 @@ def rerank(results: dict[str, list[dict]], top_k: int = RERANK_TOP_K) -> list[di
             norm_score = item.get("score", 0) / max_score
             item = dict(item)
             item["weighted_score"] = norm_score * weight
+            # Recency boost: newer documents get a small score bump
+            date_str = item.get("date", "")
+            if date_str and RECENCY_BOOST > 0:
+                try:
+                    year = int(date_str[:4])
+                    age_factor = max(0.0, min(1.0, (year - 2020) / 6))
+                    item["weighted_score"] *= (1.0 + RECENCY_BOOST * age_factor)
+                except (ValueError, IndexError):
+                    pass
             all_items.append(item)
 
     # Exact-text dedup — keep best score per unique text

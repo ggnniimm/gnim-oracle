@@ -7,6 +7,7 @@ import asyncio
 import logging
 
 from src.indexing.manager import IndexManager
+from src.retrieval.glossary import glossary_expand
 from src.retrieval.query_expand import expand_query, is_specific_query
 from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K, ORIGINAL_QUERY_BOOST
 
@@ -34,8 +35,15 @@ class Retriever:
             logger.debug(f"Expanded to {len(queries)} queries")
         else:
             if expand and specific:
-                logger.debug(f"Skipping expansion — specific query detected: {query!r}")
-            queries = [query]
+                gloss = glossary_expand(query)
+                if gloss:
+                    queries = [query] + gloss[:3]
+                    logger.debug(f"Specific query — glossary only: {queries}")
+                else:
+                    queries = [query]
+                    logger.debug(f"Skipping expansion — specific query, no glossary match: {query!r}")
+            else:
+                queries = [query]
 
         # Run all queries in parallel, collect all results
         async def _query_one(q: str) -> dict[str, list[dict]]:

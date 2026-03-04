@@ -139,6 +139,7 @@ def load_md_file(path: Path | str) -> list[Chunk]:
         "date": str(meta.get("date", "")),
         "ref_number": meta.get("ref_number") or meta.get("doc_number") or "",
         "topic": meta.get("topic", ""),
+        "subtopic": meta.get("subtopic", ""),
         "tags": meta.get("tags", []),
         "law_section": meta.get("law_section") or meta.get("laws_referenced") or [],
     }

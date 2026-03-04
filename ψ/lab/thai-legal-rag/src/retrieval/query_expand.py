@@ -6,6 +6,8 @@ import logging
 import re
 
 from google import genai
+
+from src.retrieval.glossary import glossary_expand
 from google.genai import types as genai_types
 
 from src.config import GEMINI_API_KEYS, GEMINI_FLASH_MODEL
@@ -84,7 +86,12 @@ def expand_query(query: str) -> list[str]:
             # they match title chunks of every document and drown out content chunks.
             filtered = [k for k in keywords if isinstance(k, str) and len(k) <= 30]
             result = [query] + filtered
-            result = result[:6]  # cap at 6 queries — more causes generic terms to dominate
+            # Merge static glossary terms (instant, no API cost)
+            gloss_terms = glossary_expand(query)
+            for gt in gloss_terms:
+                if gt not in result:
+                    result.append(gt)
+            result = result[:8]  # raise cap slightly to accommodate glossary terms
             logger.debug(f"Expanded '{query}' → {len(result)} terms (filtered {len(keywords)-len(filtered)} long terms)")
             return result
     except Exception as e:

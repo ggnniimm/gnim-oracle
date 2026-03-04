@@ -61,6 +61,7 @@ RERANK_TOP_K = 15
 MMR_LAMBDA = 0.7   # 1.0 = pure relevance, 0.0 = pure diversity
 MMR_INJECT_EXTRAS = 4  # after MMR, inject this many extra chunks per retrieved source
 ORIGINAL_QUERY_BOOST = 1.3  # boost scores from the original query vs expanded queries
+RECENCY_BOOST = 0.05  # newer docs get up to +5% score boost (tiebreaker only)
 
 # --- OCR ---
 OCR_MIN_CHARS_PER_PAGE = 50   # pages with fewer chars will be force-OCR'd
