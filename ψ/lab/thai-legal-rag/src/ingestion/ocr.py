@@ -422,7 +422,11 @@ _ANCHOR_PROMPT = """\
 บรรทัดที่ 1-2: คำสำคัญ 15-20 คำ คั่นด้วยช่องว่าง (เช่น ชื่อเรื่อง เลขที่หนังสือ มาตรา ข้อกฎหมาย หลักการสำคัญ)
 บรรทัดที่ 3-5: สรุปหลักการหรือข้อวินิจฉัยสำคัญ 2-3 ประโยค ใช้ภาษาที่เหมาะสำหรับการค้นหา
 
-ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text เท่านั้น
+กฎเคร่งครัด:
+- ห้ามเพิ่มตัวอย่างที่ไม่มีในเอกสาร ห้ามใส่คำว่า "เช่น" ตามด้วยสิ่งที่คิดเอง
+- ห้ามตีความหรือขยายความเกินจากเนื้อหาเอกสาร
+- ใช้เฉพาะคำ ข้อความ และหลักการที่ปรากฏในเอกสารเท่านั้น
+- ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text เท่านั้น
 
 ---
 {content}
@@ -487,6 +491,9 @@ def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str
         response = client.models.generate_content_stream(
             model=GEMINI_FLASH_MODEL,
             contents=[prompt, uploaded],
+            config=genai_types.GenerateContentConfig(
+                http_options={"timeout": 120_000},  # 120s timeout to avoid hanging
+            ),
         )
         text = ""
         for chunk in response:

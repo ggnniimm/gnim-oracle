@@ -49,6 +49,13 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Skip LightRAG indexing (FAISS only, faster)",
     )
+    p.add_argument(
+        "--topic-filter",
+        type=str,
+        default=None,
+        help="Only index docs matching this topic (e.g. 'จัดซื้อจัดจ้าง'). "
+             "OCR runs on all files (cached), but only matching docs are indexed.",
+    )
     return p.parse_args()
 
 
@@ -109,6 +116,7 @@ def main():
     failed: list[str] = []
     indexed_count = 0
     skipped_count = 0
+    filtered_count = 0
 
     for file_info in tqdm(files, desc="Indexing", unit="file"):
         file_id = file_info["id"]
@@ -128,6 +136,14 @@ def main():
                 logger.warning(f"Empty text after OCR: {file_name}")
                 failed.append(file_id)
                 continue
+
+            # Topic filter: OCR all (cached), but only index matching docs
+            if args.topic_filter:
+                _filter_keywords = [k.strip() for k in args.topic_filter.split(",")]
+                if not any(kw in text for kw in _filter_keywords):
+                    logger.info(f"Filtered out (topic mismatch): {file_name}")
+                    filtered_count += 1
+                    continue
 
             # Use category from OCR classification, fallback to CLI arg
             category = ocr_result.get("category") or args.category
@@ -197,6 +213,7 @@ def main():
     print(f"Done! Category: {args.category}")
     print(f"  Indexed:   {indexed_count} files")
     print(f"  Skipped:   {skipped_count} files (already indexed)")
+    print(f"  Filtered:  {filtered_count} files (topic mismatch)")
     print(f"  Failed:    {len(failed)} files")
     print(f"  Total DB:  {db_stats['total_indexed_chunks']} chunks")
     if failed:
