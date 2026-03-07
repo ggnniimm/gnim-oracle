@@ -11,40 +11,37 @@ from pathlib import Path
 
 import faiss
 import numpy as np
-from google import genai
 
 from src.config import (
     EMBEDDING_DIM,
     FAISS_DIR,
     FAISS_TOP_K,
-    GEMINI_API_KEYS,
     GEMINI_EMBEDDING_MODEL,
 )
+from src.gemini_client import get_client
 
 logger = logging.getLogger(__name__)
 
 _INDEX_FILE = FAISS_DIR / "index.faiss"
 _META_FILE = FAISS_DIR / "metadata.pkl"
 
-_KEY_INDEX = 0
 
-
-def _get_api_key() -> str:
-    global _KEY_INDEX
-    if not GEMINI_API_KEYS:
-        raise ValueError("No GEMINI_API_KEYS configured.")
-    key = GEMINI_API_KEYS[_KEY_INDEX % len(GEMINI_API_KEYS)]
-    _KEY_INDEX += 1
-    return key
-
-
-def _embed(texts: list[str]) -> np.ndarray:
-    """Embed a list of texts using Gemini embedding model."""
-    client = genai.Client(api_key=_get_api_key())
-    result = client.models.embed_content(
-        model=GEMINI_EMBEDDING_MODEL,
-        contents=texts,
-    )
+def _embed(texts: list[str], _retries: int = 3) -> np.ndarray:
+    """Embed a list of texts using Gemini embedding model (with retry)."""
+    import time
+    for attempt in range(1, _retries + 1):
+        try:
+            client = get_client()
+            result = client.models.embed_content(
+                model=GEMINI_EMBEDDING_MODEL,
+                contents=texts,
+            )
+            break
+        except Exception as e:
+            if attempt == _retries:
+                raise
+            logger.warning(f"Embed attempt {attempt} failed: {e}, retrying in {attempt * 2}s...")
+            time.sleep(attempt * 2)
     vectors = np.array([e.values for e in result.embeddings], dtype=np.float32)
     # Handle single text case
     if vectors.ndim == 1:

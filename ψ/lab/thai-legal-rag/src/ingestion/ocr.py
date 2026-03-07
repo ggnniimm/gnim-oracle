@@ -23,15 +23,13 @@ from google import genai
 from google.genai import types as genai_types
 
 from src.config import (
-    GEMINI_API_KEYS,
     GEMINI_FLASH_MODEL,
     MD_BACKUP_DIR,
     OCR_CACHE_DIR,
 )
+from src.gemini_client import get_client
 
 logger = logging.getLogger(__name__)
-
-_KEY_INDEX = 0
 
 # Document type → folder category mapping
 DOC_TYPE_CATEGORY = {
@@ -334,14 +332,6 @@ def _get_page_count(pdf_bytes: bytes) -> int:
         return 0
 
 
-def _get_key() -> str:
-    global _KEY_INDEX
-    if not GEMINI_API_KEYS:
-        raise ValueError("No GEMINI_API_KEYS configured.")
-    key = GEMINI_API_KEYS[_KEY_INDEX % len(GEMINI_API_KEYS)]
-    _KEY_INDEX += 1
-    return key
-
 
 def _cache_path(file_id: str) -> Path:
     h = hashlib.sha256(file_id.encode()).hexdigest()[:16]
@@ -385,7 +375,7 @@ def save_md_backup(filename: str, text: str) -> Path:
 
 
 def _client() -> genai.Client:
-    return genai.Client(api_key=_get_key())
+    return get_client()
 
 
 def _upload_pdf(client: genai.Client, pdf_bytes: bytes, filename: str = "document.pdf"):
@@ -491,9 +481,7 @@ def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str
         response = client.models.generate_content_stream(
             model=GEMINI_FLASH_MODEL,
             contents=[prompt, uploaded],
-            config=genai_types.GenerateContentConfig(
-                http_options={"timeout": 120_000},  # 120s timeout to avoid hanging
-            ),
+            config=genai_types.GenerateContentConfig(),
         )
         text = ""
         for chunk in response:

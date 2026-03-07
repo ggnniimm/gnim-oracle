@@ -214,12 +214,10 @@ def _is_text_good(text: str, page_count: int) -> bool:
 
 def _extract_gemini(pdf_bytes: bytes, filename: str) -> str:
     """Fallback: use Gemini Vision to extract law text."""
-    from google import genai
     from google.genai import types as genai_types
+    from src.gemini_client import get_client
 
-    _KEY_INDEX = 0
-    key = GEMINI_API_KEYS[0]
-    client = genai.Client(api_key=key)
+    client = get_client()
 
     prompt = """คุณคือผู้เชี่ยวชาญด้าน OCR สำหรับเอกสารราชการไทย
 อ่านและคัดลอกข้อความจากกฎหมาย/ระเบียบฉบับนี้ทั้งหมด verbatim
@@ -335,9 +333,9 @@ def _split_paragraphs_gemini(content: str) -> list[str] | None:
     if not GEMINI_API_KEYS:
         return None
     try:
-        from google import genai
+        from src.gemini_client import get_client
 
-        client = genai.Client(api_key=GEMINI_API_KEYS[0])
+        client = get_client()
         prompt = (
             "แบ่งข้อความกฎหมายไทยต่อไปนี้เป็นวรรค (paragraph) ตามโครงสร้างราชกิจจานุเบกษา\n\n"
             "กฎการรวม (ห้ามแยก — สำคัญมาก):\n"

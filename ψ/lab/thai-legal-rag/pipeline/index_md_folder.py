@@ -70,7 +70,9 @@ def main():
     total_new = 0
     total_skip = 0
 
-    for md_file in tqdm(md_files, desc="Indexing MD files"):
+    save_every = 100  # periodic save to prevent lost progress on crash
+
+    for i, md_file in enumerate(tqdm(md_files, desc="Indexing MD files"), 1):
         chunks = load_md_file(md_file)
         new_texts, new_metas = [], []
 
@@ -89,6 +91,9 @@ def main():
             for t in new_texts:
                 mark_indexed(t, source_id=source_id)
             total_new += len(new_texts)
+
+        if i % save_every == 0:
+            index.save()
 
     index.save()
     stats = dedup_stats()

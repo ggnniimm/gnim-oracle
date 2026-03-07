@@ -45,7 +45,22 @@
       "WebFetch(domain:www.spellbook.legal)",
       "WebFetch(domain:www.llrx.com)",
       "WebFetch(domain:www.truelaw.ai)",
-      "WebFetch(domain:jolt.law.harvard.edu)"
+      "WebFetch(domain:jolt.law.harvard.edu)",
+      "Bash(kill 84270:*)",
+      "Bash(vm_stat:*)",
+      "Bash(brew list mosquitto)",
+      "Read(//opt/homebrew/etc/mosquitto/**)",
+      "Read(//usr/local/etc/mosquitto/**)",
+      "Bash(/opt/homebrew/sbin/mosquitto:*)",
+      "Read(//Users/mingsaksaengwilaipon/Library/Application Support/Antigravity/Local Storage/leveldb/**)",
+      "Bash(strings:*)",
+      "Read(//Users/mingsaksaengwilaipon/Library/LaunchAgents/**)",
+      "Bash(brew services list)",
+      "Bash(brew services:*)",
+      "Bash(pkill mosquitto:*)",
+      "Bash(osascript:*)",
+      "Bash(lsof:*)",
+      "Bash(kill 50850:*)"
     ]
   }
 }

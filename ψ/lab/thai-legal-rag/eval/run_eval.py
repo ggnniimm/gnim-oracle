@@ -37,6 +37,13 @@ RESET = "\033[0m"
 
 CASES_FILE = Path(__file__).parent / "golden_test_cases.json"
 
+_THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def _normalize_numerals(text: str) -> str:
+    """Convert Thai numerals (๐-๙) to Arabic (0-9) for comparison."""
+    return text.translate(_THAI_DIGIT_MAP)
+
 
 def load_cases(filter_id: str | None = None) -> list[dict]:
     cases = json.loads(CASES_FILE.read_text(encoding="utf-8"))
@@ -61,15 +68,20 @@ def check_case(case: dict, answer: str, sources: list[dict], generate: bool) -> 
     }
 
     if generate:
+        # Normalize Thai numerals for comparison
+        answer_norm = _normalize_numerals(answer)
+
         # Check must_contain in answer
         for phrase in case.get("must_contain", []):
-            if phrase not in answer:
+            phrase_norm = _normalize_numerals(phrase)
+            if phrase_norm not in answer_norm:
                 result["passed"] = False
                 result["failures"].append(f"must_contain '{phrase}' not found in answer")
 
         # Check must_not_contain
         for phrase in case.get("must_not_contain", []):
-            if phrase in answer:
+            phrase_norm = _normalize_numerals(phrase)
+            if phrase_norm in answer_norm:
                 result["passed"] = False
                 result["failures"].append(f"must_not_contain '{phrase}' was found in answer")
     else:

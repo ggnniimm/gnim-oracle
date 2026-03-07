@@ -18,9 +18,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from google import genai
-
-from src.config import GEMINI_API_KEYS, GEMINI_FLASH_MODEL, MD_BACKUP_DIR
+from src.config import GEMINI_FLASH_MODEL, MD_BACKUP_DIR
+from src.gemini_client import get_client
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
@@ -41,28 +40,12 @@ _ANCHOR_PROMPT = """\
 {content}
 """
 
-_KEY_INDEX = 0
-
-
-def _get_key() -> str:
-    global _KEY_INDEX
-    if not GEMINI_API_KEYS:
-        raise ValueError("No GEMINI_API_KEYS configured. Set GEMINI_API_KEY env var.")
-    key = GEMINI_API_KEYS[_KEY_INDEX % len(GEMINI_API_KEYS)]
-    _KEY_INDEX += 1
-    return key
-
-
-def _client() -> genai.Client:
-    return genai.Client(api_key=_get_key())
-
-
 def has_anchor(text: str) -> bool:
     """Check if file already contains an anchor section."""
     return ANCHOR_HEADING in text
 
 
-def generate_anchor(text: str, client: genai.Client | None = None) -> str:
+def generate_anchor(text: str, client=None) -> str:
     """Generate a retrieval anchor from markdown text using Gemini.
 
     Args:
@@ -73,7 +56,7 @@ def generate_anchor(text: str, client: genai.Client | None = None) -> str:
         The anchor text (without the heading), or empty string on failure.
     """
     if client is None:
-        client = _client()
+        client = get_client()
 
     # Truncate to ~4000 chars to avoid token waste
     truncated = text[:4000]
@@ -140,7 +123,7 @@ def main():
 
     logger.info(f"Generating anchors for {total} files...")
 
-    client = _client()
+    client = get_client()
     success = 0
     failed = 0
 

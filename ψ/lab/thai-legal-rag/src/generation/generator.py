@@ -6,23 +6,12 @@ from __future__ import annotations
 
 import logging
 
-from google import genai
 from google.genai import types as genai_types
 
-from src.config import GEMINI_API_KEYS, GEMINI_FLASH_MODEL
+from src.config import GEMINI_FLASH_MODEL
+from src.gemini_client import get_client
 
 logger = logging.getLogger(__name__)
-
-_KEY_INDEX = 0
-
-
-def _get_key() -> str:
-    global _KEY_INDEX
-    if not GEMINI_API_KEYS:
-        raise ValueError("No GEMINI_API_KEYS configured.")
-    key = GEMINI_API_KEYS[_KEY_INDEX % len(GEMINI_API_KEYS)]
-    _KEY_INDEX += 1
-    return key
 
 
 _SYSTEM_PROMPT = """\
@@ -84,7 +73,7 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
     Generate answer using retrieved chunks.
     Returns {answer, sources, model}.
     """
-    client = genai.Client(api_key=_get_key())
+    client = get_client()
 
     context = build_context(chunks)
     user_prompt = _USER_PROMPT_TEMPLATE.format(
@@ -97,7 +86,7 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
             contents=user_prompt,
             config=genai_types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
-                temperature=0.1,
+                temperature=0.0,
                 max_output_tokens=4096,
             ),
         )

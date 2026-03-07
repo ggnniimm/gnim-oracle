@@ -9,37 +9,25 @@ import asyncio
 import logging
 from functools import lru_cache
 
-from google import genai
 import numpy as np
 from lightrag import LightRAG, QueryParam
 from lightrag.utils import EmbeddingFunc
 
 from src.config import (
     EMBEDDING_DIM,
-    GEMINI_API_KEYS,
     GEMINI_EMBEDDING_MODEL,
     GEMINI_FLASH_MODEL,
     LIGHTRAG_DIR,
     LIGHTRAG_TOP_K,
 )
+from src.gemini_client import get_client
 
 logger = logging.getLogger(__name__)
-
-_KEY_INDEX = 0
-
-
-def _next_key() -> str:
-    global _KEY_INDEX
-    if not GEMINI_API_KEYS:
-        raise ValueError("No GEMINI_API_KEYS configured.")
-    key = GEMINI_API_KEYS[_KEY_INDEX % len(GEMINI_API_KEYS)]
-    _KEY_INDEX += 1
-    return key
 
 
 async def _gemini_llm_func(prompt: str, **kwargs) -> str:
     """Async LLM function for LightRAG."""
-    client = genai.Client(api_key=_next_key())
+    client = get_client()
     loop = asyncio.get_event_loop()
     response = await loop.run_in_executor(
         None,
@@ -52,7 +40,7 @@ async def _gemini_llm_func(prompt: str, **kwargs) -> str:
 
 async def _gemini_embedding_func(texts: list[str]) -> np.ndarray:
     """Async embedding function for LightRAG."""
-    client = genai.Client(api_key=_next_key())
+    client = get_client()
     loop = asyncio.get_event_loop()
     result = await loop.run_in_executor(
         None,
