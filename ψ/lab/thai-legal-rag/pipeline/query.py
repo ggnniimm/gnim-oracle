@@ -135,7 +135,7 @@ def main():
     lightrag_count = len(raw_results.get("lightrag", []))
     print(f"done (FAISS: {faiss_count}, LightRAG: {lightrag_count})")
 
-    ranked = rerank(raw_results)
+    ranked = rerank(raw_results, query=args.query)
     print(f"Top {len(ranked)} chunks after reranking:")
 
     for i, chunk in enumerate(ranked, 1):

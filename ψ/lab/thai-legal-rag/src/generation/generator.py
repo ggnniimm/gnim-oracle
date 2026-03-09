@@ -32,7 +32,8 @@ _SYSTEM_PROMPT = """\
 8. หากเอกสารอ้างอิงระบุข้อยกเว้นหรือเงื่อนไขสำคัญ (เช่น "ไม่ต้องรอ...", "สามารถดำเนินการได้โดยไม่ต้อง...", "ดู กวจ. ...") ให้ระบุในคำตอบเสมอ — ข้อยกเว้นเหล่านี้มีความสำคัญต่อการปฏิบัติ
 9. หากเอกสารอ้างอิงมีหลายฉบับและแต่ละฉบับระบุหน้าที่หรือข้อกำหนดเพิ่มเติมที่แตกต่างกัน ให้สรุปหน้าที่/ข้อกำหนดจากทุกเอกสารที่เกี่ยวข้อง ห้ามละเว้นเอกสารใดเอกสารหนึ่ง
 10. หากเอกสารอ้างอิงระบุตัวเลข ระยะเวลา หรือจำนวนเงินที่เป็นสาระสำคัญ (เช่น "2 ปี", "ไม่น้อยกว่า ๒ ปี", "500,000 บาท") ให้ระบุตัวเลขนั้นในคำตอบเสมอ — ห้ามละเว้นหรือสรุปรวมโดยไม่ระบุตัวเลข
-11. ใช้ศัพท์ทางกฎหมายตามที่ปรากฏในเอกสารอ้างอิง เช่น "ข้อเสนอ" (ไม่ใช่ "ใบเสนอราคา"), "หัวหน้าหน่วยงานของรัฐ" (ไม่ใช่ "ผู้บริหาร"), "ผู้ยื่นข้อเสนอ" (ไม่ใช่ "ผู้เสนอราคา") — ห้ามแปลงเป็นคำทั่วไป"""
+11. ใช้ศัพท์ทางกฎหมายตามที่ปรากฏในเอกสารอ้างอิง เช่น "ข้อเสนอ" (ไม่ใช่ "ใบเสนอราคา"), "หัวหน้าหน่วยงานของรัฐ" (ไม่ใช่ "ผู้บริหาร"), "ผู้ยื่นข้อเสนอ" (ไม่ใช่ "ผู้เสนอราคา") — ห้ามแปลงเป็นคำทั่วไป
+12. หากเอกสารอ้างอิงระบุรายละเอียดเชิงคุณภาพที่เป็นสาระสำคัญ เช่น ชีวิต, ทรัพย์สิน, ความปลอดภัย, ประโยชน์สาธารณะ ให้ระบุรายละเอียดเหล่านั้นในคำตอบเสมอ — ห้ามสรุปรวมเป็นคำกว้างๆ เช่น ห้ามเขียนแค่ พฤติการณ์ร้ายแรง หากเอกสารระบุว่า ความเสียหายร้ายแรงต่อชีวิตหรือทรัพย์สินของประชาชน"""
 
 
 _USER_PROMPT_TEMPLATE = """\
@@ -45,9 +46,17 @@ _USER_PROMPT_TEMPLATE = """\
 
 
 def build_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into context string."""
+    """Format retrieved chunks into context string, grouped by source."""
+    # Group chunks by source so LLM reads each document contiguously
+    from collections import OrderedDict
+    grouped: OrderedDict[str, list[dict]] = OrderedDict()
+    for chunk in chunks:
+        key = chunk.get("source_name", chunk.get("source", "unknown"))
+        grouped.setdefault(key, []).append(chunk)
+    ordered_chunks = [c for group in grouped.values() for c in group]
+
     parts = []
-    for i, chunk in enumerate(chunks, 1):
+    for i, chunk in enumerate(ordered_chunks, 1):
         source = chunk.get("source_name", chunk.get("source", "unknown"))
         category = chunk.get("category", "")
         ref = chunk.get("ref_number", "")

@@ -14,6 +14,7 @@ import io
 import json
 import logging
 import os
+import re
 import tempfile
 import time
 from datetime import datetime, timezone
@@ -406,38 +407,111 @@ def _cleanup(client: genai.Client, uploaded_file) -> None:
         pass
 
 
-_ANCHOR_PROMPT = """\
-จากเอกสารกฎหมายไทยต่อไปนี้ ให้สร้างบทสรุปสำหรับสืบค้น (retrieval summary) ดังนี้:
-
-บรรทัดที่ 1-2: คำสำคัญ 15-20 คำ คั่นด้วยช่องว่าง (เช่น ชื่อเรื่อง เลขที่หนังสือ มาตรา ข้อกฎหมาย หลักการสำคัญ)
-บรรทัดที่ 3-5: สรุปหลักการหรือข้อวินิจฉัยสำคัญ 2-3 ประโยค ใช้ภาษาที่เหมาะสำหรับการค้นหา
+_KEYWORDS_PROMPT = """\
+จากเอกสารกฎหมายไทยต่อไปนี้ ให้สร้างรายการคำสำคัญ 25-30 คำ คั่นด้วยช่องว่าง
+ครอบคลุมทั้ง:
+- ชื่อเรื่อง เลขที่หนังสือ มาตรา ข้อกฎหมาย
+- หลักการสำคัญ ข้อวินิจฉัย
+- คำปฏิบัติ/ขั้นตอน เช่น ตรวจรับ ลงนาม แก้ไขสัญญา เนื้องาน ผลิตภายในประเทศ บอกเลิกสัญญา ฯลฯ
 
 กฎเคร่งครัด:
-- ห้ามเพิ่มตัวอย่างที่ไม่มีในเอกสาร ห้ามใส่คำว่า "เช่น" ตามด้วยสิ่งที่คิดเอง
-- ห้ามตีความหรือขยายความเกินจากเนื้อหาเอกสาร
-- ใช้เฉพาะคำ ข้อความ และหลักการที่ปรากฏในเอกสารเท่านั้น
-- ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text เท่านั้น
+- ใช้เฉพาะคำที่ปรากฏในเอกสาร
+- ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text บรรทัดเดียว
 
 ---
 {content}
 """
 
+_RULING_SUMMARY_PROMPT = """\
+จากข้อวินิจฉัยต่อไปนี้ ให้สรุปหลักการหรือข้อวินิจฉัยสำคัญ 2-3 ประโยค
+
+กฎเคร่งครัด:
+- สรุปเฉพาะสิ่งที่ปรากฏในข้อวินิจฉัยนี้เท่านั้น
+- ห้ามเพิ่มข้อมูลจากส่วนอื่นของเอกสาร
+- ห้ามตีความหรือขยายความเกินจากข้อวินิจฉัย
+- ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text
+
+---
+{content}
+"""
+
+_FULLTEXT_SUMMARY_PROMPT = """\
+จากเอกสารกฎหมายไทยต่อไปนี้ ให้สรุปหลักการหรือสาระสำคัญ 2-3 ประโยค
+
+กฎเคร่งครัด:
+- ใช้เฉพาะข้อมูลที่ปรากฏในเอกสาร
+- ห้ามเพิ่มตัวอย่างที่ไม่มีในเอกสาร ห้ามใส่คำว่า "เช่น" ตามด้วยสิ่งที่คิดเอง
+- ห้ามตีความหรือขยายความเกินจากเนื้อหาเอกสาร
+- ห้ามใส่หัวข้อ ห้ามใส่ bullet ให้เขียนเป็น plain text
+
+---
+{content}
+"""
+
+_RULING_SECTION_RE = re.compile(
+    r"^##\s+(?:สรุป)?ข้อวินิจฉัย.*$", re.MULTILINE
+)
+
+
+def _extract_ruling_sections(text: str) -> str:
+    """Extract ข้อวินิจฉัย and สรุปข้อวินิจฉัย sections from markdown."""
+    matches = list(_RULING_SECTION_RE.finditer(text))
+    if not matches:
+        return ""
+    sections = []
+    for match in matches:
+        start = match.start()
+        next_heading = re.search(r"^## ", text[match.end():], re.MULTILINE)
+        end = match.end() + next_heading.start() if next_heading else len(text)
+        section_text = text[start:end].strip()
+        if section_text:
+            sections.append(section_text)
+    return "\n\n".join(sections)
+
 
 def generate_anchor(text: str) -> str:
     """Generate a retrieval anchor (บทสรุปสำหรับสืบค้น) from extracted markdown.
 
-    Sends truncated text to Gemini and returns keyword-dense summary for FAISS retrieval.
+    Two-part generation to prevent cross-section hallucination:
+    1. Keywords from full document
+    2. Prose summary from ข้อวินิจฉัย sections only (fallback: full text)
+
     Returns empty string on failure (non-fatal — OCR result is still valid without anchor).
     """
-    truncated = text[:4000]
-    prompt = _ANCHOR_PROMPT.format(content=truncated)
+    # Keywords use larger window (safe — just term extraction)
+    kw_truncated = text[:8000]
+    sum_truncated = text[:4000]
     try:
         client = _client()
+
+        # Part 1: Keywords from full text (larger window)
         response = client.models.generate_content(
             model=GEMINI_FLASH_MODEL,
-            contents=[prompt],
+            contents=[_KEYWORDS_PROMPT.format(content=kw_truncated)],
         )
-        return response.text.strip()
+        keywords = response.text.strip()
+        if not keywords:
+            return ""
+
+        # Part 2: Summary from ruling sections only, or fallback
+        ruling_text = _extract_ruling_sections(text)
+        if ruling_text:
+            ruling_truncated = ruling_text[:3000]
+            response = client.models.generate_content(
+                model=GEMINI_FLASH_MODEL,
+                contents=[_RULING_SUMMARY_PROMPT.format(content=ruling_truncated)],
+            )
+        else:
+            response = client.models.generate_content(
+                model=GEMINI_FLASH_MODEL,
+                contents=[_FULLTEXT_SUMMARY_PROMPT.format(content=sum_truncated)],
+            )
+        summary = response.text.strip()
+
+        if not summary:
+            return keywords
+        return f"{keywords}\n\n{summary}"
+
     except Exception as e:
         logger.warning(f"Anchor generation failed (non-fatal): {e}")
         return ""

@@ -64,9 +64,14 @@ def _mmr_select(candidates: list[dict], top_k: int, lambda_: float) -> list[dict
     return selected
 
 
-def rerank(results: dict[str, list[dict]], top_k: int = RERANK_TOP_K) -> list[dict]:
+def rerank(
+    results: dict[str, list[dict]],
+    top_k: int = RERANK_TOP_K,
+    query: str = "",
+) -> list[dict]:
     """
     Fuse FAISS + BM25 + LightRAG results, deduplicate, MMR-select, source-complete.
+    query: original query string, used for glossary-based injection from dedup pool.
     """
     all_items: list[dict] = []
 
@@ -98,7 +103,7 @@ def rerank(results: dict[str, list[dict]], top_k: int = RERANK_TOP_K) -> list[di
         if key not in seen:
             seen.add(key)
             deduped.append(item)
-        if len(deduped) >= top_k * 5:
+        if len(deduped) >= top_k * 8:
             break
 
     # MMR selection
@@ -135,6 +140,47 @@ def rerank(results: dict[str, list[dict]], top_k: int = RERANK_TOP_K) -> list[di
                 f"from {len(injected_per_source)} sources"
             )
             top = top + extras
+
+    # Glossary injection — if the query triggers glossary expansion terms,
+    # scan remaining dedup pool for chunks containing those terms.
+    # This rescues relevant documents that MMR diversity penalty excluded.
+    # Runs BEFORE source expansion so injected sources also get expanded.
+    if query:
+        from src.retrieval.glossary import glossary_expand
+        gloss_terms = glossary_expand(query)
+        if gloss_terms:
+            top_texts_gl = {item.get("text", "")[:200].strip() for item in top}
+            top_sources_gl = {
+                item.get("source_name") or item.get("filename", "")
+                for item in top
+            }
+            gloss_extras: list[dict] = []
+            max_gloss_inject = 3
+
+            for item in deduped:
+                if len(gloss_extras) >= max_gloss_inject:
+                    break
+                text_key = item.get("text", "")[:200].strip()
+                if text_key in top_texts_gl:
+                    continue
+                src = item.get("source_name") or item.get("filename", "")
+                if src in top_sources_gl:
+                    continue  # already have chunks from this source
+                text = item.get("text", "")
+                # Check if chunk contains at least 2 glossary terms
+                match_count = sum(1 for t in gloss_terms if t in text)
+                if match_count >= 2:
+                    gloss_extras.append(item)
+                    top_texts_gl.add(text_key)
+
+            if gloss_extras:
+                for ge in gloss_extras:
+                    ge["_gloss_injected"] = True
+                logger.debug(
+                    f"Glossary injection: {len(gloss_extras)} chunks "
+                    f"matching glossary terms for query {query!r}"
+                )
+                top = top + gloss_extras
 
     logger.debug(
         f"Reranked {len(all_items)} items → {len(deduped)} deduped → top {len(top)}"

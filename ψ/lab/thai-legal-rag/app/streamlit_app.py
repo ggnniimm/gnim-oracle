@@ -100,7 +100,7 @@ if question:
         with st.spinner("กำลังค้นหาและประมวลผล..."):
             try:
                 raw_results = retriever.retrieve(question, expand=True)
-                ranked_chunks = rerank(raw_results)
+                ranked_chunks = rerank(raw_results, query=question)
                 result = generate_answer(question, ranked_chunks)
 
                 st.markdown(result["answer"])

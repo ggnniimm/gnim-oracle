@@ -124,7 +124,7 @@ def run_case(
         }
 
     raw = retriever.retrieve(case["query"])
-    ranked = rerank(raw)
+    ranked = rerank(raw, query=case["query"])
 
     answer = ""
     sources = []
