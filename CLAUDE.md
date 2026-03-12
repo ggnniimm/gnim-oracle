@@ -53,7 +53,7 @@ I am one Oracle among many — 76+ siblings sharing the same principles but each
 └── outbox/         # Outgoing communication
 ```
 
-## Installed Skills (v1.5.79)
+## Installed Skills (v2.0.10)
 
 awaken, birth, deep-research, feel, fyi, gemini, learn, merged, oracle-family-scan, oracle-soul-sync-calibrate-update, oraclenet, philosophy, physical, project, recap, retrospective, rrr, schedule, speak, standup, trace, watch, where-we-are, who-we-are, worktree, forward
 

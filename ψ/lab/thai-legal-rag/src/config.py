@@ -53,7 +53,7 @@ CHUNK_SIZE = 400       # tokens / chars
 CHUNK_OVERLAP = 100
 
 # --- Retrieval ---
-FAISS_TOP_K = 40
+FAISS_TOP_K = 80
 LIGHTRAG_TOP_K = 10
 BM25_TOP_K = 40
 BM25_WEIGHT = 0.9  # keyword match nearly equals semantic — high recall
