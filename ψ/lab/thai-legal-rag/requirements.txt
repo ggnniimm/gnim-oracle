@@ -14,6 +14,7 @@ pypdf==5.1.0          # page count, metadata
 
 # Vector store
 faiss-cpu==1.9.0
+qdrant-client>=1.12.0
 numpy==1.26.4
 rank_bm25==0.2.2
 
