@@ -10,7 +10,7 @@ import uuid
 
 import numpy as np
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 
 from src.config import (
     EMBEDDING_DIM,
@@ -135,6 +135,34 @@ class QdrantStore:
             item["source"] = "faiss"  # keep compatible with reranker weight keys
             results.append(item)
         return results
+
+    def delete_by_source_name(self, source_name: str) -> int:
+        """Delete all points whose source_name matches (exact). Returns count deleted."""
+        deleted = 0
+        offset = None
+        flt = Filter(must=[FieldCondition(key="source_name", match=MatchValue(value=source_name))])
+        while True:
+            result, next_offset = self._client.scroll(
+                collection_name=_COLLECTION,
+                scroll_filter=flt,
+                limit=100,
+                offset=offset,
+                with_payload=False,
+                with_vectors=False,
+            )
+            if not result:
+                break
+            ids = [p.id for p in result]
+            self._client.delete(
+                collection_name=_COLLECTION,
+                points_selector=ids,
+            )
+            deleted += len(ids)
+            if next_offset is None:
+                break
+            offset = next_offset
+        logger.info(f"Deleted {deleted} points for source_name={source_name!r}")
+        return deleted
 
     def save(self) -> None:
         """No-op for Qdrant — data is persisted automatically in local mode."""

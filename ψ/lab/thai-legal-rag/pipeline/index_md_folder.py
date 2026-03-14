@@ -6,8 +6,11 @@ Use this when MD files already exist — skips OCR step.
 Usage:
     python index_md_folder.py --dir ψ/lab/sample-docs/
     python index_md_folder.py --dir /path/to/md_files/ --dry-run
+    python index_md_folder.py --dir data/md_backup --force-reindex --file doc_X.md
 """
 import argparse
+import hashlib
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -18,6 +21,7 @@ from tqdm import tqdm
 from src.ingestion.md_loader import load_md_file
 from src.ingestion.dedup import is_indexed, mark_indexed, stats as dedup_stats
 from src.indexing.manager import IndexManager
+from src.config import DEDUP_DB
 
 _THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 
@@ -45,18 +49,60 @@ def _metadata_prefix(meta: dict) -> str:
     return "[" + " | ".join(parts) + "]\n\n"
 
 
+def _delete_dedup_entries(enriched_texts: list[str]) -> int:
+    """Delete dedup DB entries for the given enriched texts. Returns count deleted."""
+    hashes = [hashlib.sha256(t.encode("utf-8")).hexdigest() for t in enriched_texts]
+    con = sqlite3.connect(DEDUP_DB)
+    cur = con.execute(
+        f"DELETE FROM indexed_chunks WHERE hash IN ({','.join('?' * len(hashes))})",
+        hashes,
+    )
+    count = cur.rowcount
+    con.commit()
+    con.close()
+    return count
+
+
 def parse_args():
-    p = argparse.ArgumentParser(description="Index MD files into FAISS + LightRAG")
+    p = argparse.ArgumentParser(description="Index MD files into vector store")
     p.add_argument("--dir", required=True, type=Path, help="Directory containing .md files")
     p.add_argument("--dry-run", action="store_true", help="Show chunks without indexing")
-    p.add_argument("--no-lightrag", action="store_true", help="FAISS only")
+    p.add_argument("--no-lightrag", action="store_true", help="Skip LightRAG, vector store only")
+    p.add_argument(
+        "--force-reindex",
+        action="store_true",
+        help="Delete existing vectors + dedup entries for --file before re-indexing",
+    )
+    p.add_argument(
+        "--file",
+        type=str,
+        action="append",
+        dest="files",
+        metavar="FILENAME",
+        help="Filename(s) to process (repeatable). Required with --force-reindex.",
+    )
     return p.parse_args()
 
 
 def main():
     args = parse_args()
-    md_files = sorted(args.dir.glob("*.md"))
-    print(f"Found {len(md_files)} MD files in {args.dir}")
+
+    if args.force_reindex and not args.files:
+        print("Error: --force-reindex requires --file <filename>")
+        sys.exit(1)
+
+    if args.files:
+        md_files = []
+        for name in args.files:
+            matches = list(args.dir.glob(name)) or [args.dir / name]
+            md_files.extend([f for f in matches if f.exists()])
+        if not md_files:
+            print(f"No matching files found in {args.dir}")
+            sys.exit(1)
+        print(f"Processing {len(md_files)} file(s): {[f.name for f in md_files]}")
+    else:
+        md_files = sorted(args.dir.glob("*.md"))
+        print(f"Found {len(md_files)} MD files in {args.dir}")
 
     if args.dry_run:
         for f in md_files:
@@ -67,10 +113,33 @@ def main():
         return
 
     index = IndexManager(use_lightrag=not args.no_lightrag)
+
+    # --- force-reindex: purge old data before indexing ---
+    if args.force_reindex:
+        vector_store = index.vector  # QdrantStore or FAISSStore
+        for md_file in md_files:
+            chunks = load_md_file(md_file)
+            source_name = chunks[0].metadata.get("source_name") if chunks else md_file.name
+
+            # 1. Delete from vector store (Qdrant only — FAISS has no delete)
+            if hasattr(vector_store, "delete_by_source_name"):
+                n_vec = vector_store.delete_by_source_name(source_name)
+                print(f"  [{md_file.name}] Deleted {n_vec} vectors (source_name={source_name!r})")
+            else:
+                print(f"  [{md_file.name}] Vector store has no delete — skipping vector purge")
+
+            # 2. Delete from dedup DB
+            enriched_texts = []
+            for chunk in chunks:
+                prefix = _metadata_prefix(chunk.metadata)
+                enriched_texts.append(prefix + chunk.text if prefix else chunk.text)
+            n_dedup = _delete_dedup_entries(enriched_texts)
+            print(f"  [{md_file.name}] Deleted {n_dedup} dedup entries")
+
+    # --- normal indexing loop ---
     total_new = 0
     total_skip = 0
-
-    save_every = 100  # periodic save to prevent lost progress on crash
+    save_every = 100
 
     for i, md_file in enumerate(tqdm(md_files, desc="Indexing MD files"), 1):
         chunks = load_md_file(md_file)
