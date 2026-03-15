@@ -4,9 +4,9 @@ No hardcoded paths anywhere else in the codebase.
 """
 import os
 from pathlib import Path
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
-load_dotenv()
+load_dotenv(find_dotenv(usecwd=True, raise_error_if_not_found=False))
 
 # --- API Keys ---
 GEMINI_API_KEYS: list[str] = [
