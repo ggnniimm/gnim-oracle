@@ -88,7 +88,9 @@ def main():
     use_lightrag = not args.no_lightrag
 
     print(f"\nQuery    : {args.query}")
-    print(f"Mode     : {'FAISS only' if not use_lightrag else f'FAISS + LightRAG ({args.mode})'}")
+    from src.config import VECTOR_BACKEND
+    _backend_label = VECTOR_BACKEND.capitalize()
+    print(f"Mode     : {f'{_backend_label} only' if not use_lightrag else f'{_backend_label} + LightRAG ({args.mode})'}")
     print(f"Expand   : {not args.no_expand}")
     print_separator()
 
