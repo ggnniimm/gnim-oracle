@@ -2,17 +2,12 @@
 """
 Thai Legal RAG — Query CLI
 
-Test RAG queries against FAISS + LightRAG indexes.
-Useful for verifying cross-document retrieval (ข้อหารือ + law).
-
 Usage:
     python pipeline/query.py "มาตรา 60 บอกว่าอะไร"
-    python pipeline/query.py "ข้อหารือที่อ้าง มาตรา 60 มีกี่ฉบับ" --mode global
-    python pipeline/query.py "ค่าปรับผิดสัญญา" --no-lightrag --top-k 10
+    python pipeline/query.py "ค่าปรับผิดสัญญา" --top-k 10
     python pipeline/query.py "ค่าปรับ" --no-generate   # retrieve only, no LLM answer
 """
 import argparse
-import asyncio
 import logging
 import sys
 from pathlib import Path
@@ -23,7 +18,7 @@ from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
 from src.generation.generator import generate_answer
-from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K
+from src.config import FAISS_TOP_K
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -34,16 +29,9 @@ logging.basicConfig(
 def parse_args():
     p = argparse.ArgumentParser(description="Query Thai Legal RAG indexes")
     p.add_argument("query", nargs="?", help="Query string (Thai)")
-    p.add_argument(
-        "--mode",
-        choices=["hybrid", "local", "global", "naive"],
-        default="hybrid",
-        help="LightRAG query mode (default: hybrid)",
-    )
-    p.add_argument("--no-lightrag", action="store_true", help="FAISS only")
     p.add_argument("--no-generate", action="store_true", help="Skip LLM answer, show chunks only")
     p.add_argument("--no-expand", action="store_true", help="Skip query expansion")
-    p.add_argument("--top-k", type=int, default=FAISS_TOP_K, help=f"FAISS top-k (default {FAISS_TOP_K})")
+    p.add_argument("--top-k", type=int, default=FAISS_TOP_K, help=f"Top-k (default {FAISS_TOP_K})")
     p.add_argument("--verbose", "-v", action="store_true", help="Show debug logs")
     return p.parse_args()
 
@@ -85,42 +73,19 @@ def main():
             print("กรุณาระบุคำถาม")
             sys.exit(1)
 
-    use_lightrag = not args.no_lightrag
-
     print(f"\nQuery    : {args.query}")
     from src.config import VECTOR_BACKEND
-    _backend_label = VECTOR_BACKEND.capitalize()
-    print(f"Mode     : {f'{_backend_label} only' if not use_lightrag else f'{_backend_label} + LightRAG ({args.mode})'}")
+    print(f"Mode     : {VECTOR_BACKEND.capitalize()} only")
     print(f"Expand   : {not args.no_expand}")
     print_separator()
 
     # --- Load index ---
     print("Loading index...", end=" ", flush=True)
     try:
-        index = IndexManager(use_lightrag=use_lightrag)
+        index = IndexManager(use_lightrag=False)
     except Exception as e:
         print(f"\nFailed to load index: {e}")
         sys.exit(1)
-
-    # Patch LightRAG query mode if needed
-    if use_lightrag and args.mode != "hybrid":
-        from lightrag import QueryParam
-        original_search = index.lightrag.search
-
-        async def patched_search(query: str, k: int = LIGHTRAG_TOP_K) -> list[dict]:
-            try:
-                response = await index.lightrag._rag.aquery(
-                    query,
-                    param=QueryParam(mode=args.mode, top_k=k),
-                )
-                if not response:
-                    return []
-                return [{"text": response, "score": 1.0, "source": "lightrag", "source_name": "LightRAG Graph"}]
-            except Exception as e:
-                logging.warning(f"LightRAG patched search failed: {e}")
-                return []
-
-        index.lightrag.search = patched_search
 
     retriever = Retriever(index)
     print("done")
@@ -134,21 +99,14 @@ def main():
         sys.exit(1)
 
     faiss_count = len(raw_results.get("faiss", []))
-    lightrag_count = len(raw_results.get("lightrag", []))
-    print(f"done (FAISS: {faiss_count}, LightRAG: {lightrag_count})")
+    bm25_count = len(raw_results.get("bm25", []))
+    print(f"done (vector: {faiss_count}, BM25: {bm25_count})")
 
     ranked = rerank(raw_results, query=args.query)
     print(f"Top {len(ranked)} chunks after reranking:")
 
     for i, chunk in enumerate(ranked, 1):
         print_chunk(i, chunk)
-
-    # --- LightRAG raw response ---
-    if use_lightrag and raw_results.get("lightrag"):
-        print_separator()
-        print("\nLightRAG Graph Response:")
-        for item in raw_results["lightrag"]:
-            print(item.get("text", "")[:800])
 
     # --- Generate ---
     if not args.no_generate and ranked:
