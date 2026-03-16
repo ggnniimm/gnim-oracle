@@ -71,12 +71,18 @@ def check_case(case: dict, answer: str, sources: list[dict], generate: bool) -> 
         # Normalize Thai numerals for comparison
         answer_norm = _normalize_numerals(answer)
 
-        # Check must_contain in answer
+        # Check must_contain in answer (supports array-of-arrays for OR logic)
         for phrase in case.get("must_contain", []):
-            phrase_norm = _normalize_numerals(phrase)
-            if phrase_norm not in answer_norm:
-                result["passed"] = False
-                result["failures"].append(f"must_contain '{phrase}' not found in answer")
+            if isinstance(phrase, list):
+                # OR logic: at least one alternative must be present
+                if not any(_normalize_numerals(p) in answer_norm for p in phrase):
+                    result["passed"] = False
+                    result["failures"].append(f"must_contain {phrase} not found in answer")
+            else:
+                phrase_norm = _normalize_numerals(phrase)
+                if phrase_norm not in answer_norm:
+                    result["passed"] = False
+                    result["failures"].append(f"must_contain '{phrase}' not found in answer")
 
         # Check must_not_contain
         for phrase in case.get("must_not_contain", []):

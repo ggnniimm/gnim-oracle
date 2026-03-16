@@ -24,6 +24,13 @@ _SOURCE_WEIGHTS = {
     "bm25": BM25_WEIGHT,
 }
 
+# คำพิพากษาศาลปกครองมีน้ำหนักสูงสุด เพราะเป็นแหล่งหลักกฎหมายที่ผูกพัน
+# คำวินิจฉัยอัยการสูงสุดรองมา แล้วค่อย กวจ./กรมบัญชีกลาง
+_CATEGORY_BOOST = {
+    "ศาลปกครอง": 1.30,
+    "สำนักงานอัยการสูงสุด": 1.05,
+}
+
 
 def _jaccard(a: str, b: str) -> float:
     """Token-level Jaccard similarity between two Thai texts."""
@@ -84,6 +91,10 @@ def rerank(
             norm_score = item.get("score", 0) / max_score
             item = dict(item)
             item["weighted_score"] = norm_score * weight
+            # Category boost: court judgments ranked above advisory opinions
+            cat = item.get("category", "")
+            if cat in _CATEGORY_BOOST:
+                item["weighted_score"] *= _CATEGORY_BOOST[cat]
             # Recency boost: newer documents get a small score bump
             date_str = item.get("date", "")
             if date_str and RECENCY_BOOST > 0:
