@@ -17,6 +17,7 @@ from src.config import (
     FAISS_TOP_K,
     GEMINI_EMBEDDING_MODEL,
     QDRANT_PATH,
+    QDRANT_URL,
 )
 from src.gemini_client import get_client
 
@@ -52,7 +53,11 @@ def _embed(texts: list[str], _retries: int = 3) -> np.ndarray:
 
 class QdrantStore:
     def __init__(self):
-        if QDRANT_PATH:
+        if QDRANT_URL:
+            # Server mode (Docker / Qdrant Cloud)
+            self._client = QdrantClient(url=QDRANT_URL)
+            logger.info(f"Qdrant server mode: {QDRANT_URL}")
+        elif QDRANT_PATH:
             # Persistent local storage
             self._client = QdrantClient(path=str(QDRANT_PATH))
             logger.info(f"Qdrant local mode: {QDRANT_PATH}")

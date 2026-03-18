@@ -1,14 +1,13 @@
 """
 Thai Legal RAG — Streamlit Query Interface
 
-Features:
-- Natural language query in Thai
-- Automatic fusion retrieval (FAISS + LightRAG)
-- Source citations with Drive links
-- Chat history per category
-- API keys from env only (no UI input)
+Usage:
+    cd ψ/lab/thai-legal-rag
+    THAI_RAG_DATA_DIR=$(pwd)/data_with_ac streamlit run app/streamlit_app.py
 """
+import re
 import sys
+from collections import OrderedDict
 from pathlib import Path
 
 import streamlit as st
@@ -19,7 +18,7 @@ from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
 from src.generation.generator import generate_answer
-from src.config import DRIVE_FOLDER_IDS, GEMINI_API_KEYS
+from src.config import GEMINI_API_KEYS
 
 st.set_page_config(
     page_title="Thai Legal RAG",
@@ -27,75 +26,108 @@ st.set_page_config(
     layout="wide",
 )
 
-# --- Sidebar ---
+# ── Citation helpers (mirrors export_answers_html.py) ─────────────────────────
+
+def _build_source_map(chunks: list[dict]) -> tuple[dict[int, int], list[dict]]:
+    grouped: OrderedDict[str, list[dict]] = OrderedDict()
+    for chunk in chunks:
+        key = chunk.get("source_name", chunk.get("source", "unknown"))
+        grouped.setdefault(key, []).append(chunk)
+    ordered_chunks = [c for group in grouped.values() for c in group]
+
+    source_list: list[dict] = []
+    source_index: dict[str, int] = {}
+    for chunk in ordered_chunks:
+        name = chunk.get("source_name", chunk.get("source", "unknown"))
+        if name not in source_index:
+            idx = len(source_list) + 1
+            source_index[name] = idx
+            source_list.append({
+                "index": idx,
+                "name": name,
+                "drive_id": chunk.get("source_drive_id", ""),
+            })
+
+    chunk_to_src: dict[int, int] = {}
+    for i, chunk in enumerate(ordered_chunks, 1):
+        name = chunk.get("source_name", chunk.get("source", "unknown"))
+        chunk_to_src[i] = source_index[name]
+
+    return chunk_to_src, source_list
+
+
+def _replace_refs(answer: str, chunk_to_src: dict[int, int]) -> str:
+    def replace(m: re.Match) -> str:
+        nums = [int(x.strip()) for x in m.group(1).split(",")]
+        src_indices = list(dict.fromkeys(chunk_to_src.get(n, n) for n in nums))
+        return "[" + ", ".join(str(i) for i in src_indices) + "]"
+    return re.sub(r"\[([\d ,]+)\]", replace, answer)
+
+
+# ── Sidebar ────────────────────────────────────────────────────────────────────
+
 with st.sidebar:
     st.title("⚖️ Thai Legal RAG")
     st.caption("ระบบค้นหากฎหมายจัดซื้อจัดจ้างภาครัฐ")
 
     if not GEMINI_API_KEYS:
-        st.error("GEMINI_API_KEYS not set in environment.")
+        st.error("GEMINI_API_KEY not set in environment.")
         st.stop()
-
-    category = st.selectbox(
-        "หมวดหมู่เอกสาร",
-        options=list(DRIVE_FOLDER_IDS.keys()),
-        index=0,
-    )
-
-    use_lightrag = st.checkbox("ใช้ LightRAG (Graph-based)", value=True)
 
     with st.expander("ℹ️ เกี่ยวกับระบบ"):
         st.markdown("""
-        **Thai Legal RAG v2**
-        - OCR: Gemini Vision
-        - Vector Search: FAISS + LightRAG
-        - LLM: Gemini 2.0 Flash
-        - Persona: นิติกรชำนาญการพิเศษ
+**Thai Legal RAG**
+- Vector: Qdrant + BM25 hybrid
+- Embedding: gemini-embedding-2-preview
+- LLM: Gemini 2.0 Flash
+- Persona: นิติกรชำนาญการพิเศษ
         """)
 
-# --- Initialize ---
-@st.cache_resource
-def get_index(use_lightrag_flag: bool) -> tuple:
-    index = IndexManager(use_lightrag=use_lightrag_flag)
-    retriever = Retriever(index)
-    return index, retriever
+    if st.button("ล้างประวัติการสนทนา", use_container_width=True):
+        st.session_state.messages = []
+        st.rerun()
+
+# ── Index (cached across reruns) ───────────────────────────────────────────────
+
+@st.cache_resource(show_spinner="กำลังโหลด index...")
+def get_retriever():
+    index = IndexManager(use_lightrag=False)
+    return Retriever(index)
 
 
-index, retriever = get_index(use_lightrag)
+retriever = get_retriever()
 
-# --- Chat history ---
-chat_key = f"chat_{category}"
-if chat_key not in st.session_state:
-    st.session_state[chat_key] = []
+# ── Chat history ───────────────────────────────────────────────────────────────
 
-# --- Main ---
-st.header(f"ถามคำถามกฎหมาย — {category}")
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-# Display chat history
-for msg in st.session_state[chat_key]:
+st.header("ถามคำถามกฎหมายจัดซื้อจัดจ้าง")
+
+for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         if msg.get("sources"):
-            with st.expander(f"📚 แหล่งอ้างอิง ({len(msg['sources'])} เอกสาร)"):
-                for src in msg["sources"]:
-                    drive_id = src.get("drive_id", "")
-                    name = src.get("name", "Unknown")
+            with st.expander(f"เอกสารอ้างอิง ({len(msg['sources'])} รายการ)"):
+                for s in msg["sources"]:
+                    idx = s["index"]
+                    name = s["name"]
+                    drive_id = s.get("drive_id", "")
                     if drive_id:
                         url = f"https://drive.google.com/file/d/{drive_id}/view"
-                        st.markdown(f"- [{name}]({url})")
+                        st.markdown(f"**[{idx}]** [{name}]({url})")
                     else:
-                        st.markdown(f"- {name}")
+                        st.markdown(f"**[{idx}]** {name}")
 
-# Query input
-question = st.chat_input("พิมพ์คำถามของคุณ เช่น 'ค่าปรับผิดสัญญามีขั้นตอนยังไง'")
+# ── Input ──────────────────────────────────────────────────────────────────────
+
+question = st.chat_input("พิมพ์คำถาม เช่น 'ค่าปรับผิดสัญญามีขั้นตอนยังไง'")
 
 if question:
-    # Show user message
-    st.session_state[chat_key].append({"role": "user", "content": question})
+    st.session_state.messages.append({"role": "user", "content": question})
     with st.chat_message("user"):
         st.markdown(question)
 
-    # Retrieve + generate
     with st.chat_message("assistant"):
         with st.spinner("กำลังค้นหาและประมวลผล..."):
             try:
@@ -103,31 +135,31 @@ if question:
                 ranked_chunks = rerank(raw_results, query=question)
                 result = generate_answer(question, ranked_chunks)
 
-                st.markdown(result["answer"])
+                chunk_to_src, source_list = _build_source_map(ranked_chunks)
+                answer = _replace_refs(result["answer"], chunk_to_src)
 
-                if result["sources"]:
-                    with st.expander(f"📚 แหล่งอ้างอิง ({len(result['sources'])} เอกสาร)"):
-                        for src in result["sources"]:
-                            drive_id = src.get("drive_id", "")
-                            name = src.get("name", "Unknown")
+                st.markdown(answer)
+
+                if source_list:
+                    with st.expander(f"เอกสารอ้างอิง ({len(source_list)} รายการ)"):
+                        for s in source_list:
+                            idx = s["index"]
+                            name = s["name"]
+                            drive_id = s.get("drive_id", "")
                             if drive_id:
                                 url = f"https://drive.google.com/file/d/{drive_id}/view"
-                                st.markdown(f"- [{name}]({url})")
+                                st.markdown(f"**[{idx}]** [{name}]({url})")
                             else:
-                                st.markdown(f"- {name}")
+                                st.markdown(f"**[{idx}]** {name}")
 
-                st.caption(
-                    f"Model: {result['model']} | Chunks used: {result['chunks_used']} | "
-                    f"FAISS: {len(raw_results.get('faiss', []))} | "
-                    f"LightRAG: {len(raw_results.get('lightrag', []))}"
-                )
+                st.caption(f"Model: {result['model']} | Chunks: {result['chunks_used']}")
 
-                # Save to history
-                st.session_state[chat_key].append({
+                st.session_state.messages.append({
                     "role": "assistant",
-                    "content": result["answer"],
-                    "sources": result["sources"],
+                    "content": answer,
+                    "sources": source_list,
                 })
 
             except Exception as e:
                 st.error(f"เกิดข้อผิดพลาด: {e}")
+                raise

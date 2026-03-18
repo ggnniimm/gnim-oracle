@@ -1,0 +1,11 @@
+data/
+data_with_ac/
+__pycache__/
+**/__pycache__/
+*.pyc
+.env
+.git/
+eval/
+pipeline/
+tests/
+ψ/

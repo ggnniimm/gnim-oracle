@@ -73,6 +73,7 @@ def main():
             "failure_detail",
             "คำตอบ",
             "แหล่งอ้างอิง (cited)",
+            "drive_links",
             "must_contain",
             "must_not_contain",
             "expected_sources",
@@ -89,10 +90,17 @@ def main():
                 ranked = rerank(results, query=query)
                 answer_data = generate_answer(query, ranked)
                 answer = answer_data["answer"]
-                cited = [s["name"] for s in answer_data["sources"]]
+                sources = answer_data["sources"]
+                cited = [s["name"] for s in sources]
+                drive_links = "\n".join(
+                    f"{s['name']}\nhttps://drive.google.com/file/d/{s['drive_id']}/view"
+                    for s in sources
+                    if s.get("drive_id")
+                )
             except Exception as e:
                 answer = f"ERROR: {e}"
                 cited = []
+                drive_links = ""
                 print(f"  ⚠ {e}", flush=True)
 
             status, detail = _check(case, answer)
@@ -105,6 +113,7 @@ def main():
                 detail,
                 answer,
                 ", ".join(cited),
+                drive_links,
                 ", ".join(
                     ("|".join(p) if isinstance(p, list) else p)
                     for p in case.get("must_contain", [])

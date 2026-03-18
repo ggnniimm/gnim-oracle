@@ -208,36 +208,89 @@ def print_summary(results: list[dict]):
     print(f"{'═' * 60}")
 
 
+def _run_case_wrapper(args_tuple):
+    """Wrapper for parallel execution via ProcessPoolExecutor."""
+    case, generate = args_tuple
+    # Each worker needs its own IndexManager (Qdrant client not fork-safe)
+    if not hasattr(_run_case_wrapper, "_retriever"):
+        idx = IndexManager(use_lightrag=False)
+        _run_case_wrapper._retriever = Retriever(idx)
+    return run_case(case, _run_case_wrapper._retriever, generate)
+
+
 def main():
     p = argparse.ArgumentParser(description="Run Thai Legal RAG golden eval")
     p.add_argument("--id", help="Run a single test case by ID (e.g. TC-001)")
     p.add_argument("--no-generate", action="store_true", help="Retrieval only — skip LLM answer generation")
     p.add_argument("--json", action="store_true", dest="json_out", help="Print results as JSON")
     p.add_argument("--verbose", "-v", action="store_true", help="Show answer snippet on failure")
+    p.add_argument("--workers", "-w", type=int, default=1,
+                   help="Parallel workers (default 1; use 3 for safe parallelism with 1 API key)")
     args = p.parse_args()
 
     cases = load_cases(filter_id=args.id)
     generate = not args.no_generate
-
-    print(f"\nLoading index...", end=" ", flush=True)
-    index = IndexManager(use_lightrag=False)
-    retriever = Retriever(index)
-    print("done")
+    workers = args.workers
 
     mode = "retrieval+generation" if generate else "retrieval only"
-    print(f"Running {len(cases)} test case(s) [{mode}]")
-    print("─" * 60)
 
-    results = []
-    for case in cases:
-        note = case.get("notes", "")
-        if note and note.startswith("⚠️"):
-            print(f"\n{YELLOW}[{case['id']}] Skipping — {note[:60]}{RESET}")
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        result = run_case(case, retriever, generate)
-        results.append(result)
-        if not (note and note.startswith("⚠️")):
-            print_result(result, verbose=args.verbose)
+        print(f"\nLoading index...", end=" ", flush=True)
+        index = IndexManager(use_lightrag=False)
+        retriever = Retriever(index)
+        print("done")
+
+        print(f"Running {len(cases)} test case(s) [{mode}] with {workers} workers")
+        print("─" * 60)
+
+        # Submit all cases to thread pool
+        results_map = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_case = {}
+            for case in cases:
+                note = case.get("notes", "")
+                if note and note.startswith("⚠️"):
+                    # Skip directly
+                    results_map[case["id"]] = {
+                        "id": case["id"], "query": case["query"],
+                        "passed": None, "failures": [], "warnings": [f"Skipped — {note[:60]}"],
+                        "answer_snippet": "", "sources_found": [], "elapsed": 0.0,
+                    }
+                    continue
+                future = pool.submit(run_case, case, retriever, generate)
+                future_to_case[future] = case
+
+            for future in as_completed(future_to_case):
+                result = future.result()
+                results_map[result["id"]] = result
+                print_result(result, verbose=args.verbose)
+
+        # Preserve original order
+        results = []
+        for case in cases:
+            if case["id"] in results_map:
+                results.append(results_map[case["id"]])
+    else:
+        print(f"\nLoading index...", end=" ", flush=True)
+        index = IndexManager(use_lightrag=False)
+        retriever = Retriever(index)
+        print("done")
+
+        print(f"Running {len(cases)} test case(s) [{mode}]")
+        print("─" * 60)
+
+        results = []
+        for case in cases:
+            note = case.get("notes", "")
+            if note and note.startswith("⚠️"):
+                print(f"\n{YELLOW}[{case['id']}] Skipping — {note[:60]}{RESET}")
+
+            result = run_case(case, retriever, generate)
+            results.append(result)
+            if not (note and note.startswith("⚠️")):
+                print_result(result, verbose=args.verbose)
 
     if args.json_out:
         print(json.dumps(results, ensure_ascii=False, indent=2))
