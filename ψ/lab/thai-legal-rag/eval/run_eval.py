@@ -26,6 +26,7 @@ from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
 from src.generation.generator import generate_answer
+from src.gemini_client import get_client
 
 # ── ANSI colours ────────────────────────────────────────────────────────────
 GREEN = "\033[92m"
@@ -43,6 +44,33 @@ _THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 def _normalize_numerals(text: str) -> str:
     """Convert Thai numerals (๐-๙) to Arabic (0-9) for comparison."""
     return text.translate(_THAI_DIGIT_MAP)
+
+
+def _semantic_check(answer: str, concept: str) -> bool:
+    """Ask Gemini Flash whether the answer discusses a concept. Returns True/False."""
+    from google.genai import types as genai_types
+
+    prompt = f"""Does the following answer discuss or address the concept "{concept}"?
+The concept may be expressed using different words, synonyms, or paraphrasing.
+Answer ONLY "YES" or "NO".
+
+Answer to evaluate:
+{answer[:3000]}"""
+
+    try:
+        client = get_client()
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt],
+            config=genai_types.GenerateContentConfig(
+                max_output_tokens=5,
+                temperature=0.0,
+            ),
+        )
+        result = (resp.text or "").strip().upper()
+        return result.startswith("YES")
+    except Exception:
+        return False  # on error, fall back to keyword failure
 
 
 def load_cases(filter_id: str | None = None) -> list[dict]:
@@ -67,20 +95,38 @@ def check_case(case: dict, answer: str, sources: list[dict], generate: bool) -> 
         "sources_found": [s.get("name", "") for s in sources],
     }
 
+    # semantic_check: list of concept descriptions — when keyword fails,
+    # try semantic fallback for matching concepts
+    semantic_fallbacks = case.get("semantic_check", [])
+
     if generate:
         # Normalize Thai numerals for comparison
         answer_norm = _normalize_numerals(answer)
 
         # Check must_contain in answer (supports array-of-arrays for OR logic)
-        for phrase in case.get("must_contain", []):
+        for i, phrase in enumerate(case.get("must_contain", [])):
             if isinstance(phrase, list):
                 # OR logic: at least one alternative must be present
                 if not any(_normalize_numerals(p) in answer_norm for p in phrase):
+                    # Keyword failed — try semantic fallback if available
+                    if i < len(semantic_fallbacks) and semantic_fallbacks[i]:
+                        concept = semantic_fallbacks[i]
+                        if _semantic_check(answer, concept):
+                            result["warnings"].append(
+                                f"must_contain {phrase} passed via semantic check ('{concept}')")
+                            continue
                     result["passed"] = False
                     result["failures"].append(f"must_contain {phrase} not found in answer")
             else:
                 phrase_norm = _normalize_numerals(phrase)
                 if phrase_norm not in answer_norm:
+                    # Keyword failed — try semantic fallback if available
+                    if i < len(semantic_fallbacks) and semantic_fallbacks[i]:
+                        concept = semantic_fallbacks[i]
+                        if _semantic_check(answer, concept):
+                            result["warnings"].append(
+                                f"must_contain '{phrase}' passed via semantic check ('{concept}')")
+                            continue
                     result["passed"] = False
                     result["failures"].append(f"must_contain '{phrase}' not found in answer")
 

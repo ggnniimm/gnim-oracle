@@ -20,8 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from dotenv import load_dotenv
-load_dotenv(Path(__file__).parent.parent.parent.parent.parent / ".env")
+from dotenv import load_dotenv, find_dotenv
+load_dotenv(find_dotenv(usecwd=True, raise_error_if_not_found=False))
 
 from src.ingestion.drive import stream_pdf
 from src.ingestion.ocr import _upload_pdf, _client, _cleanup
