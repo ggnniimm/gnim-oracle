@@ -3,7 +3,7 @@ Thai Legal RAG — Streamlit Query Interface
 
 Usage:
     cd ψ/lab/thai-legal-rag
-    THAI_RAG_DATA_DIR=$(pwd)/data_with_ac streamlit run app/streamlit_app.py
+    THAI_RAG_DATA_DIR=$(pwd)/data streamlit run app/streamlit_app.py
 """
 import re
 import sys

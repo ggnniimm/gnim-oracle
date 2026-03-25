@@ -62,32 +62,37 @@ _USER_PROMPT_TEMPLATE = """\
 
 
 _RESCUE_PHRASES = [
-    # (trigger, phrase_to_find_in_chunk, sentence_to_append)
+    # (trigger, phrase_to_find_in_chunk, sentence_to_append, query_keywords)
+    # query_keywords: at least one must appear in the query for the rescue to fire
     (
         "ไม่ต้องรอ",
         "ไม่ต้องรอให้กระบวนการพิจารณาให้เป็นผู้ทิ้งงาน",
         "**หมายเหตุ:** การจัดหาผู้รับจ้างรายใหม่สามารถดำเนินการได้โดยไม่ต้องรอให้กระบวนการพิจารณาให้เป็นผู้ทิ้งงานสิ้นสุด",
+        ["ผู้ทิ้งงาน", "บอกเลิก", "จ้างรายใหม่"],
     ),
     (
         "ผ่านหัวหน้าเจ้าหน้าที่",
         "ผ่านหัวหน้าเจ้าหน้าที่",
         "**หมายเหตุ:** การรายงานผลต่อหัวหน้าหน่วยงานของรัฐต้องเสนอผ่านหัวหน้าเจ้าหน้าที่ ตามระเบียบกระทรวงการคลังฯ",
+        ["หัวหน้าเจ้าหน้าที่", "รายงานผล", "ขั้นตอนการรายงาน"],
     ),
     (
         "ผลิตภายในประเทศ",
         "ผลิตภายในประเทศ",
         "**หมายเหตุ:** คณะกรรมการตรวจรับพัสดุมีหน้าที่ตรวจสอบว่าพัสดุที่ส่งมอบเป็นพัสดุที่ผลิตภายในประเทศตามเงื่อนไขสัญญา (หนังสือเวียน ว ๗๘)",
+        ["ผลิตภายในประเทศ", "พัสดุไทย", "ว 78", "ว ๗๘"],
     ),
 ]
 
 
-def _rescue_key_phrases(answer: str, chunks: list[dict]) -> str:
+def _rescue_key_phrases(answer: str, chunks: list[dict], query: str = "") -> str:
     """If a key phrase exists in retrieved chunks but is missing from the
-    answer, append it so the information is not lost."""
+    answer, append it — only when the query is relevant."""
     all_text = " ".join(c.get("text", "") for c in chunks)
-    for trigger, phrase, sentence in _RESCUE_PHRASES:
+    for trigger, phrase, sentence, query_kws in _RESCUE_PHRASES:
         if phrase in all_text and trigger not in answer:
-            answer = answer.rstrip() + "\n\n" + sentence
+            if any(kw in query for kw in query_kws):
+                answer = answer.rstrip() + "\n\n" + sentence
     return answer
 
 
@@ -151,7 +156,7 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
         answer = f"เกิดข้อผิดพลาดในการประมวลผล: {e}"
 
     # Post-processing: rescue key phrases from chunks that LLM omitted
-    answer = _rescue_key_phrases(answer, chunks)
+    answer = _rescue_key_phrases(answer, chunks, query=question)
 
     # Extract unique sources for citation
     sources = []
