@@ -122,16 +122,22 @@ class QdrantStore:
                     f"{(len(texts) - 1) // batch_size + 1} ({len(batch_texts)} texts)"
                 )
 
-    def search(self, query: str, k: int = FAISS_TOP_K) -> list[dict]:
+    def search(self, query: str, k: int = FAISS_TOP_K, payload_filter: dict | None = None) -> list[dict]:
         """Returns list of {text, score, **metadata}."""
         total = self._client.get_collection(_COLLECTION).points_count
         if total == 0:
             return []
         vector = _embed([query])
+        qdrant_filter = (
+            Filter(must=[FieldCondition(key=payload_filter["field"], match=MatchValue(value=payload_filter["value"]))])
+            if payload_filter
+            else None
+        )
         response = self._client.query_points(
             collection_name=_COLLECTION,
             query=vector[0].tolist(),
             limit=min(k, total),
+            query_filter=qdrant_filter,
         )
         results = []
         for hit in response.points:

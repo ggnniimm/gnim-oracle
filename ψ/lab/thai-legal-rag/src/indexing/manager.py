@@ -77,10 +77,11 @@ class IndexManager:
         query: str,
         faiss_k: int = FAISS_TOP_K,
         lightrag_k: int = LIGHTRAG_TOP_K,
+        payload_filter: dict | None = None,
     ) -> dict[str, list[dict]]:
         """Async parallel query of all stores."""
         vector_task = asyncio.get_event_loop().run_in_executor(
-            None, lambda: self.vector.search(query, k=faiss_k)
+            None, lambda: self.vector.search(query, k=faiss_k, payload_filter=payload_filter)
         )
         bm25_task = asyncio.get_event_loop().run_in_executor(
             None, lambda: self.bm25.search(query, k=BM25_TOP_K)
@@ -94,6 +95,8 @@ class IndexManager:
         vector_results, bm25_results, lightrag_results = await asyncio.gather(
             vector_task, bm25_task, lightrag_task
         )
+        if payload_filter:
+            bm25_results = [r for r in bm25_results if r.get(payload_filter["field"]) == payload_filter["value"]]
         return {"faiss": vector_results, "bm25": bm25_results, "lightrag": lightrag_results}
 
     def query(self, query: str, k: int = FAISS_TOP_K) -> dict[str, list[dict]]:

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 
 from src.indexing.manager import IndexManager
 from src.retrieval.glossary import glossary_expand
@@ -12,6 +13,30 @@ from src.retrieval.query_expand import expand_query, is_specific_query
 from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K, ORIGINAL_QUERY_BOOST
 
 logger = logging.getLogger(__name__)
+
+_JUDGMENT_KEYWORDS = re.compile(r"คำพิพากษา|คำสั่งศาล|ศาลปกครอง|คดีปกครอง")
+_ATTORNEY_KEYWORDS = re.compile(r"อัยการสูงสุด|สำนักงานอัยการ|คำวินิจฉัยอัยการ|อัยการ(?:สูงสุด|จังหวัด|พิเศษ)")
+
+
+def _detect_payload_filter(query: str, history: list[dict] | None = None) -> dict | None:
+    """Return {field, value} payload filter if query targets a specific source type."""
+    def _check(q: str) -> dict | None:
+        if _JUDGMENT_KEYWORDS.search(q):
+            return {"field": "category", "value": "คำพิพากษา"}
+        if _ATTORNEY_KEYWORDS.search(q):
+            return {"field": "issued_by", "value": "สำนักงานอัยการสูงสุด"}
+        return None
+
+    result = _check(query)
+    if result:
+        return result
+    if history:
+        for msg in history[-6:]:
+            if msg.get("role") == "user":
+                result = _check(msg.get("content", ""))
+                if result:
+                    return result
+    return None
 
 
 class Retriever:
@@ -24,7 +49,9 @@ class Retriever:
         expand: bool = True,
         faiss_k: int = FAISS_TOP_K,
         lightrag_k: int = LIGHTRAG_TOP_K,
+        history: list[dict] | None = None,
     ) -> dict[str, list[dict]]:
+        payload_filter = _detect_payload_filter(query, history)
         """
         Async retrieval with optional query expansion.
         Returns {"faiss": [...], "lightrag": [...]}.
@@ -47,7 +74,7 @@ class Retriever:
 
         # Run all queries in parallel, collect all results
         async def _query_one(q: str) -> dict[str, list[dict]]:
-            return await self.index.query_async(q, faiss_k=faiss_k, lightrag_k=lightrag_k)
+            return await self.index.query_async(q, faiss_k=faiss_k, lightrag_k=lightrag_k, payload_filter=payload_filter)
 
         all_results = await asyncio.gather(*[_query_one(q) for q in queries])
 
@@ -91,12 +118,12 @@ class Retriever:
             "lightrag": list(merged_lightrag.values()),
         }
 
-    def retrieve(self, query: str, expand: bool = True) -> dict[str, list[dict]]:
+    def retrieve(self, query: str, expand: bool = True, history: list[dict] | None = None) -> dict[str, list[dict]]:
         """Sync wrapper."""
         try:
             loop = asyncio.get_running_loop()
             import nest_asyncio
             nest_asyncio.apply()
-            return loop.run_until_complete(self.retrieve_async(query, expand=expand))
+            return loop.run_until_complete(self.retrieve_async(query, expand=expand, history=history))
         except RuntimeError:
-            return asyncio.run(self.retrieve_async(query, expand=expand))
+            return asyncio.run(self.retrieve_async(query, expand=expand, history=history))

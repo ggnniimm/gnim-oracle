@@ -50,7 +50,7 @@ for _d in [FAISS_DIR, LIGHTRAG_DIR, BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAIL
     _d.mkdir(parents=True, exist_ok=True)
 
 # --- Models ---
-GEMINI_FLASH_MODEL = "gemini-2.0-flash"
+GEMINI_FLASH_MODEL = "gemini-2.5-flash"
 GEMINI_EMBEDDING_MODEL = "models/gemini-embedding-2-preview"
 EMBEDDING_DIM = 3072  # gemini-embedding-2-preview default output dim
 

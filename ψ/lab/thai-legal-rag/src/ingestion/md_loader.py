@@ -156,6 +156,7 @@ def load_md_file(path: Path | str) -> list[Chunk]:
         "source_name": meta.get("source_file") or meta.get("original_filename") or path.name,
         "source_url": meta.get("file_url", ""),
         "category": meta.get("type") or meta.get("doc_type") or "ข้อหารือ กวจ.",
+        "issued_by": meta.get("issued_by", ""),
         "date": str(meta.get("date", "")),
         "ref_number": meta.get("ref_number") or meta.get("doc_number") or "",
         "topic": meta.get("topic", ""),

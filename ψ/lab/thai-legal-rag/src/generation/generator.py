@@ -128,9 +128,14 @@ def build_context(chunks: list[dict]) -> str:
     return "\n\n---\n\n".join(parts)
 
 
-def generate_answer(question: str, chunks: list[dict]) -> dict:
+def generate_answer(
+    question: str,
+    chunks: list[dict],
+    history: list[dict] | None = None,
+) -> dict:
     """
     Generate answer using retrieved chunks.
+    history: list of {"role": "user"|"assistant", "content": str} from previous turns.
     Returns {answer, sources, model}.
     """
     client = get_client()
@@ -140,14 +145,30 @@ def generate_answer(question: str, chunks: list[dict]) -> dict:
         question=question, context=context
     )
 
+    # Build multi-turn contents if history provided (last 6 turns = 3 exchanges)
+    if history:
+        contents: list = []
+        for msg in history[-6:]:
+            role = "user" if msg["role"] == "user" else "model"
+            contents.append(genai_types.Content(
+                role=role,
+                parts=[genai_types.Part(text=msg["content"])],
+            ))
+        contents.append(genai_types.Content(
+            role="user",
+            parts=[genai_types.Part(text=user_prompt)],
+        ))
+    else:
+        contents = user_prompt
+
     try:
         response = client.models.generate_content(
             model=GEMINI_FLASH_MODEL,
-            contents=user_prompt,
+            contents=contents,
             config=genai_types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
                 temperature=0.0,
-                max_output_tokens=4096,
+                max_output_tokens=8192,
             ),
         )
         answer = response.text.strip()
