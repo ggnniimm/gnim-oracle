@@ -21,12 +21,17 @@ file_url: "..."
 """
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import yaml
 
 from src.ingestion.chunker import ThaiTextSplitter, Chunk, CHUNK_SIZE, CHUNK_OVERLAP
+from src.ingestion.law_extractor import LawDocument, _parse_sections, _detect_law_meta
+from src.ingestion.chunker_law import chunk_law_document
 
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?)\n---\s*\n", re.DOTALL)
@@ -119,23 +124,39 @@ def _section_chunks(body: str, base_meta: dict) -> list[Chunk]:
     return chunks
 
 
+def _is_law_file(meta: dict, filename: str) -> bool:
+    """Detect if this file is a law/regulation (พ.ร.บ. or ระเบียบ) that should use section-aware chunking.
+
+    Avoids false positives from ข้อหารือ files that merely reference laws in their filename
+    (e.g. "ข้อหารือตามระเบียบกระทรวงการคลังฯ").
+    """
+    cat = (meta.get("type") or meta.get("doc_type") or "").strip()
+    if cat == "กฎหมาย":
+        return True
+    # Exclude ข้อหารือ/กวจ files that reference laws
+    stem = filename.lower()
+    if "ข้อหารือ" in stem or "_กวจ_" in stem or "_กวพ_" in stem:
+        return False
+    return stem.startswith("พรบ") or stem.startswith("ระเบียบกระทรวง") or "กฎกระทรวง" in stem
+
+
 def load_md_file(path: Path | str) -> list[Chunk]:
     """
     Load a single MD file with frontmatter → list of Chunks.
-    Metadata from frontmatter is attached to every chunk.
+    Law files (พ.ร.บ./ระเบียบ) are chunked per มาตรา/ข้อ with วรรค headers.
+    Other files use standard ThaiTextSplitter.
     """
     path = Path(path)
     text = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(text)
 
     # Normalize metadata keys to what the pipeline expects.
-    # Supports both legacy format (source_file, type, ref_number, law_section)
-    # and OCR pipeline format (original_filename, doc_type, doc_number, laws_referenced).
     base_meta = {
         "source_drive_id": meta.get("file_id", ""),
         "source_name": meta.get("source_file") or meta.get("original_filename") or path.name,
         "source_url": meta.get("file_url", ""),
         "category": meta.get("type") or meta.get("doc_type") or "ข้อหารือ กวจ.",
+        "issued_by": meta.get("issued_by", ""),
         "date": str(meta.get("date", "")),
         "ref_number": meta.get("ref_number") or meta.get("doc_number") or "",
         "topic": meta.get("topic", ""),
@@ -144,7 +165,45 @@ def load_md_file(path: Path | str) -> list[Chunk]:
         "law_section": meta.get("law_section") or meta.get("laws_referenced") or [],
     }
 
+    if _is_law_file(meta, path.name):
+        chunks = _load_law_chunks(body, meta, base_meta, path)
+        if chunks:
+            return chunks
+        # Fallback to generic chunks if law parser found no sections
+        logger.warning(f"Law chunking found no sections for '{path.name}', falling back to generic chunks")
+
     return _section_chunks(body, base_meta)
+
+
+def _load_law_chunks(body: str, meta: dict, base_meta: dict, path: Path) -> list[Chunk]:
+    """Parse law body into LawDocument and chunk per section/paragraph."""
+    law_name, law_short_name, law_type, law_year_be = _detect_law_meta(body, path.name)
+
+    # Override from frontmatter if available
+    law_name = meta.get("law_name") or law_name
+    law_short_name = meta.get("law_short_name") or law_short_name
+    law_type = meta.get("law_type") or law_type
+    law_year_be = meta.get("law_year_be") or law_year_be
+
+    # Strip [context headers] that were added by law_extractor's MD generation
+    # e.g. "[พ.ร.บ.จัดซื้อจัดจ้างฯ 2560]" before each มาตรา
+    clean_body = re.sub(r"^\[.*?\]\s*$", "", body, flags=re.MULTILINE)
+
+    sections = _parse_sections(clean_body, use_gemini=False)
+
+    doc = LawDocument(
+        filename=path.name,
+        file_id=base_meta.get("source_drive_id", ""),
+        law_name=law_name,
+        law_short_name=law_short_name,
+        law_type=law_type,
+        law_year_be=law_year_be,
+        sections=sections,
+        full_text=body,
+        total_sections=len(sections),
+    )
+
+    return chunk_law_document(doc)
 
 
 def load_md_directory(directory: Path | str) -> list[Chunk]:

@@ -26,6 +26,7 @@ from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
 from src.generation.generator import generate_answer
+from src.gemini_client import get_client
 
 # ── ANSI colours ────────────────────────────────────────────────────────────
 GREEN = "\033[92m"
@@ -43,6 +44,33 @@ _THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 def _normalize_numerals(text: str) -> str:
     """Convert Thai numerals (๐-๙) to Arabic (0-9) for comparison."""
     return text.translate(_THAI_DIGIT_MAP)
+
+
+def _semantic_check(answer: str, concept: str) -> bool:
+    """Ask Gemini Flash whether the answer discusses a concept. Returns True/False."""
+    from google.genai import types as genai_types
+
+    prompt = f"""Does the following answer discuss or address the concept "{concept}"?
+The concept may be expressed using different words, synonyms, or paraphrasing.
+Answer ONLY "YES" or "NO".
+
+Answer to evaluate:
+{answer[:3000]}"""
+
+    try:
+        client = get_client()
+        resp = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=[prompt],
+            config=genai_types.GenerateContentConfig(
+                max_output_tokens=5,
+                temperature=0.0,
+            ),
+        )
+        result = (resp.text or "").strip().upper()
+        return result.startswith("YES")
+    except Exception:
+        return False  # on error, fall back to keyword failure
 
 
 def load_cases(filter_id: str | None = None) -> list[dict]:
@@ -67,16 +95,40 @@ def check_case(case: dict, answer: str, sources: list[dict], generate: bool) -> 
         "sources_found": [s.get("name", "") for s in sources],
     }
 
+    # semantic_check: list of concept descriptions — when keyword fails,
+    # try semantic fallback for matching concepts
+    semantic_fallbacks = case.get("semantic_check", [])
+
     if generate:
         # Normalize Thai numerals for comparison
         answer_norm = _normalize_numerals(answer)
 
-        # Check must_contain in answer
-        for phrase in case.get("must_contain", []):
-            phrase_norm = _normalize_numerals(phrase)
-            if phrase_norm not in answer_norm:
-                result["passed"] = False
-                result["failures"].append(f"must_contain '{phrase}' not found in answer")
+        # Check must_contain in answer (supports array-of-arrays for OR logic)
+        for i, phrase in enumerate(case.get("must_contain", [])):
+            if isinstance(phrase, list):
+                # OR logic: at least one alternative must be present
+                if not any(_normalize_numerals(p) in answer_norm for p in phrase):
+                    # Keyword failed — try semantic fallback if available
+                    if i < len(semantic_fallbacks) and semantic_fallbacks[i]:
+                        concept = semantic_fallbacks[i]
+                        if _semantic_check(answer, concept):
+                            result["warnings"].append(
+                                f"must_contain {phrase} passed via semantic check ('{concept}')")
+                            continue
+                    result["passed"] = False
+                    result["failures"].append(f"must_contain {phrase} not found in answer")
+            else:
+                phrase_norm = _normalize_numerals(phrase)
+                if phrase_norm not in answer_norm:
+                    # Keyword failed — try semantic fallback if available
+                    if i < len(semantic_fallbacks) and semantic_fallbacks[i]:
+                        concept = semantic_fallbacks[i]
+                        if _semantic_check(answer, concept):
+                            result["warnings"].append(
+                                f"must_contain '{phrase}' passed via semantic check ('{concept}')")
+                            continue
+                    result["passed"] = False
+                    result["failures"].append(f"must_contain '{phrase}' not found in answer")
 
         # Check must_not_contain
         for phrase in case.get("must_not_contain", []):
@@ -202,36 +254,89 @@ def print_summary(results: list[dict]):
     print(f"{'═' * 60}")
 
 
+def _run_case_wrapper(args_tuple):
+    """Wrapper for parallel execution via ProcessPoolExecutor."""
+    case, generate = args_tuple
+    # Each worker needs its own IndexManager (Qdrant client not fork-safe)
+    if not hasattr(_run_case_wrapper, "_retriever"):
+        idx = IndexManager(use_lightrag=False)
+        _run_case_wrapper._retriever = Retriever(idx)
+    return run_case(case, _run_case_wrapper._retriever, generate)
+
+
 def main():
     p = argparse.ArgumentParser(description="Run Thai Legal RAG golden eval")
     p.add_argument("--id", help="Run a single test case by ID (e.g. TC-001)")
     p.add_argument("--no-generate", action="store_true", help="Retrieval only — skip LLM answer generation")
     p.add_argument("--json", action="store_true", dest="json_out", help="Print results as JSON")
     p.add_argument("--verbose", "-v", action="store_true", help="Show answer snippet on failure")
+    p.add_argument("--workers", "-w", type=int, default=1,
+                   help="Parallel workers (default 1; use 3 for safe parallelism with 1 API key)")
     args = p.parse_args()
 
     cases = load_cases(filter_id=args.id)
     generate = not args.no_generate
-
-    print(f"\nLoading index...", end=" ", flush=True)
-    index = IndexManager(use_lightrag=False)
-    retriever = Retriever(index)
-    print("done")
+    workers = args.workers
 
     mode = "retrieval+generation" if generate else "retrieval only"
-    print(f"Running {len(cases)} test case(s) [{mode}]")
-    print("─" * 60)
 
-    results = []
-    for case in cases:
-        note = case.get("notes", "")
-        if note and note.startswith("⚠️"):
-            print(f"\n{YELLOW}[{case['id']}] Skipping — {note[:60]}{RESET}")
+    if workers > 1:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
 
-        result = run_case(case, retriever, generate)
-        results.append(result)
-        if not (note and note.startswith("⚠️")):
-            print_result(result, verbose=args.verbose)
+        print(f"\nLoading index...", end=" ", flush=True)
+        index = IndexManager(use_lightrag=False)
+        retriever = Retriever(index)
+        print("done")
+
+        print(f"Running {len(cases)} test case(s) [{mode}] with {workers} workers")
+        print("─" * 60)
+
+        # Submit all cases to thread pool
+        results_map = {}
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            future_to_case = {}
+            for case in cases:
+                note = case.get("notes", "")
+                if note and note.startswith("⚠️"):
+                    # Skip directly
+                    results_map[case["id"]] = {
+                        "id": case["id"], "query": case["query"],
+                        "passed": None, "failures": [], "warnings": [f"Skipped — {note[:60]}"],
+                        "answer_snippet": "", "sources_found": [], "elapsed": 0.0,
+                    }
+                    continue
+                future = pool.submit(run_case, case, retriever, generate)
+                future_to_case[future] = case
+
+            for future in as_completed(future_to_case):
+                result = future.result()
+                results_map[result["id"]] = result
+                print_result(result, verbose=args.verbose)
+
+        # Preserve original order
+        results = []
+        for case in cases:
+            if case["id"] in results_map:
+                results.append(results_map[case["id"]])
+    else:
+        print(f"\nLoading index...", end=" ", flush=True)
+        index = IndexManager(use_lightrag=False)
+        retriever = Retriever(index)
+        print("done")
+
+        print(f"Running {len(cases)} test case(s) [{mode}]")
+        print("─" * 60)
+
+        results = []
+        for case in cases:
+            note = case.get("notes", "")
+            if note and note.startswith("⚠️"):
+                print(f"\n{YELLOW}[{case['id']}] Skipping — {note[:60]}{RESET}")
+
+            result = run_case(case, retriever, generate)
+            results.append(result)
+            if not (note and note.startswith("⚠️")):
+                print_result(result, verbose=args.verbose)
 
     if args.json_out:
         print(json.dumps(results, ensure_ascii=False, indent=2))

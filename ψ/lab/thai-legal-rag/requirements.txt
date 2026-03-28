@@ -3,7 +3,7 @@
 
 # Google
 google-api-python-client==2.156.0
-google-auth==2.37.0
+google-auth>=2.47.0
 google-auth-oauthlib==1.2.1
 google-auth-httplib2==0.2.0
 google-genai==1.63.0
@@ -14,6 +14,7 @@ pypdf==5.1.0          # page count, metadata
 
 # Vector store
 faiss-cpu==1.9.0
+qdrant-client>=1.12.0
 numpy==1.26.4
 rank_bm25==0.2.2
 

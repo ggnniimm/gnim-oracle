@@ -522,12 +522,13 @@ def _post_merge_paragraphs(paragraphs: list[str]) -> list[str]:
     return result
 
 
-def _split_paragraphs(section_text: str) -> list[str]:
+def _split_paragraphs(section_text: str, *, use_gemini: bool = True) -> list[str]:
     """Split a section's text into วรรค (paragraphs).
 
     Strategy: Gemini first, blank-line split as fallback.
     - Gemini handles all semantic boundary detection (วรรค, list merging, etc.)
     - Blank-line split is used only when Gemini is unavailable or fails.
+    - Set use_gemini=False to skip Gemini (e.g. when loading pre-processed MD).
     """
     lines = section_text.strip().splitlines()
     # Drop the label prefix but preserve any inline content on the same line.
@@ -544,8 +545,8 @@ def _split_paragraphs(section_text: str) -> list[str]:
     # Collapse triple+ newlines (artifacts from page header stripping) before Gemini
     content = re.sub(r"\n{3,}", "\n\n", content)
 
-    # Gemini: always use for semantic paragraph splitting
-    gemini_result = _split_paragraphs_gemini(content)
+    # Gemini: use for semantic paragraph splitting (unless disabled)
+    gemini_result = _split_paragraphs_gemini(content) if use_gemini else None
     if gemini_result:
         return _post_merge_paragraphs(gemini_result)
 
@@ -797,9 +798,11 @@ def _trim_trailing_structure(section_text: str) -> str:
 
 # ── Section parser ─────────────────────────────────────────────────────────────
 
-def _parse_sections(text: str) -> list[LawSection]:
+def _parse_sections(text: str, *, use_gemini: bool = True) -> list[LawSection]:
     """
     Parse law text into individual มาตรา/ข้อ sections with hierarchy metadata.
+
+    Set use_gemini=False to skip Gemini paragraph splitting (faster, for pre-processed MD).
     """
     sections: list[LawSection] = []
     current_part = ""
@@ -858,7 +861,7 @@ def _parse_sections(text: str) -> list[LawSection]:
             text=section_text,
             part=part,
             chapter=chapter,
-            paragraphs=_split_paragraphs(section_text),
+            paragraphs=_split_paragraphs(section_text, use_gemini=use_gemini),
             references=_extract_references(section_text, number),
         ))
 

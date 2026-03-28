@@ -1,72 +1,132 @@
 """
-Export all test case queries with full RAG answers to CSV.
-Usage: PYTHONUNBUFFERED=1 THAI_RAG_DATA_DIR=$(pwd)/data python3 eval/export_answers_csv.py
+Export all TC queries with full RAG answers + PASS/FAIL to CSV (Excel-ready).
+Usage:
+    cd ψ/lab/thai-legal-rag
+    THAI_RAG_DATA_DIR=$(pwd)/data_with_ac python3 eval/export_answers_csv.py
+    THAI_RAG_DATA_DIR=$(pwd)/data_with_ac python3 eval/export_answers_csv.py --id TC-066
 """
+import argparse
 import csv
 import json
 import sys
 import time
 from pathlib import Path
 
-# Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
-from src.generation.generator import generate_answer, build_context
+from src.generation.generator import generate_answer
+
+_THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
+
+
+def _normalize(text: str) -> str:
+    return text.translate(_THAI_DIGIT_MAP)
+
+
+def _check(case: dict, answer: str) -> tuple[str, str]:
+    answer_norm = _normalize(answer)
+    failures = []
+
+    for phrase in case.get("must_contain", []):
+        if isinstance(phrase, list):
+            if not any(_normalize(p) in answer_norm for p in phrase):
+                failures.append(f"must_contain {phrase} ไม่พบ")
+        else:
+            if _normalize(phrase) not in answer_norm:
+                failures.append(f"must_contain '{phrase}' ไม่พบ")
+
+    for phrase in case.get("must_not_contain", []):
+        if _normalize(phrase) in answer_norm:
+            failures.append(f"must_not_contain '{phrase}' พบในคำตอบ")
+
+    return ("PASS" if not failures else "FAIL", "; ".join(failures))
 
 
 def main():
-    cases_path = Path(__file__).parent / "golden_test_cases.json"
-    with open(cases_path, encoding="utf-8") as f:
-        cases = json.load(f)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--id", help="Run single TC by ID")
+    parser.add_argument("--out", default="eval/tc_answers.csv", help="Output CSV path")
+    args = parser.parse_args()
 
-    print(f"Loading index...", end=" ", flush=True)
+    cases_path = Path(__file__).parent / "golden_test_cases.json"
+    cases = json.loads(cases_path.read_text(encoding="utf-8"))
+    if args.id:
+        cases = [c for c in cases if c["id"] == args.id]
+
+    print("Loading index...", end=" ", flush=True)
     index = IndexManager(use_lightrag=False)
     retriever = Retriever(index)
     print("done", flush=True)
 
-    output_path = Path(__file__).parent / "tc_answers.csv"
+    output_path = Path(args.out)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(output_path, "w", newline="", encoding="utf-8-sig") as csvfile:
-        writer = csv.writer(csvfile)
+    with open(output_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
         writer.writerow([
             "TC_ID",
             "คำถาม",
+            "PASS/FAIL",
+            "failure_detail",
             "คำตอบ",
-            "แหล่งอ้างอิง",
+            "แหล่งอ้างอิง (cited)",
+            "drive_links",
             "must_contain",
+            "must_not_contain",
+            "expected_sources",
             "notes",
         ])
 
         for i, case in enumerate(cases):
             tc_id = case["id"]
             query = case["query"]
-            must_contain = ", ".join(case.get("must_contain", []))
-            notes = case.get("notes", "")
-
-            print(f"[{i+1}/{len(cases)}] {tc_id}: {query[:50]}...", flush=True)
+            print(f"[{i+1}/{len(cases)}] {tc_id}: {query[:50]}", flush=True)
 
             try:
-                import asyncio
-                results = asyncio.run(retriever.retrieve_async(query))
-                ranked = rerank(results)
+                results = retriever.retrieve(query, expand=True)
+                ranked = rerank(results, query=query)
                 answer_data = generate_answer(query, ranked)
                 answer = answer_data["answer"]
-                sources = ", ".join(s["name"] for s in answer_data["sources"])
+                sources = answer_data["sources"]
+                cited = [s["name"] for s in sources]
+                drive_links = "\n".join(
+                    f"{s['name']}\nhttps://drive.google.com/file/d/{s['drive_id']}/view"
+                    for s in sources
+                    if s.get("drive_id")
+                )
             except Exception as e:
                 answer = f"ERROR: {e}"
-                sources = ""
+                cited = []
+                drive_links = ""
                 print(f"  ⚠ {e}", flush=True)
 
-            writer.writerow([tc_id, query, answer, sources, must_contain, notes])
+            status, detail = _check(case, answer)
+            print(f"  → {status}" + (f"  {detail}" if detail else ""), flush=True)
 
-            # Rate limit protection
+            writer.writerow([
+                tc_id,
+                query,
+                status,
+                detail,
+                answer,
+                ", ".join(cited),
+                drive_links,
+                ", ".join(
+                    ("|".join(p) if isinstance(p, list) else p)
+                    for p in case.get("must_contain", [])
+                ),
+                ", ".join(case.get("must_not_contain", [])),
+                ", ".join(case.get("expected_sources", [])),
+                case.get("notes", ""),
+            ])
+
             if (i + 1) % 5 == 0:
-                time.sleep(2)
+                time.sleep(1)
 
-    print(f"\nDone! Saved to: {output_path}", flush=True)
+    print(f"\nDone → {output_path.resolve()}", flush=True)
 
 
 if __name__ == "__main__":
