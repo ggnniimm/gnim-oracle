@@ -15,7 +15,7 @@ GEMINI_API_KEYS: list[str] = [
     if k.strip()
 ]
 
-GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 # OAuth2 paths (set via env or use defaults)
 # GOOGLE_CREDENTIALS_JSON and GOOGLE_TOKEN_JSON are read directly in drive.py
 

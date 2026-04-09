@@ -156,7 +156,7 @@ def main():
 
         if new_texts:
             index.add_batch(new_texts, new_metas)
-            source_id = chunks[0].metadata.get("source_drive_id") or md_file.stem
+            source_id = chunks[0].metadata.get("file_id") or md_file.stem
             for t in new_texts:
                 mark_indexed(t, source_id=source_id)
             total_new += len(new_texts)

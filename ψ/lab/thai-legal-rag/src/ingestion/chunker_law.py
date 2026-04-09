@@ -10,7 +10,7 @@ Metadata per chunk:
     doc_type, law_name, law_short_name, law_type, law_year_be,
     part, chapter, section, paragraph, total_paragraphs,
     section_numbers (for grouped chunks),
-    source_drive_id, source_name, source_url, chunk_index
+    file_id, source_name, file_url, chunk_index
 """
 from __future__ import annotations
 
@@ -39,9 +39,8 @@ def _base_meta(doc: LawDocument, sec: LawSection, chunk_index: int) -> dict:
         "law_year_be": doc.law_year_be,
         "part": sec.part,
         "chapter": sec.chapter,
-        "source_drive_id": doc.file_id,
+        "file_id": doc.file_id,
         "source_name": doc.filename,
-        "source_url": f"https://drive.google.com/file/d/{doc.file_id}/view",
         "file_url": f"https://drive.google.com/file/d/{doc.file_id}/view",
         "chunk_index": chunk_index,
         "category": "กฎหมาย",

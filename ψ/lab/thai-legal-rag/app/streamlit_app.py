@@ -104,7 +104,7 @@ def _build_source_map(chunks: list[dict]) -> tuple[dict[int, int], list[dict]]:
             source_list.append({
                 "index": idx,
                 "name": name,
-                "drive_id": chunk.get("source_drive_id", ""),
+                "url": chunk.get("file_url", ""),
             })
 
     chunk_to_src: dict[int, int] = {}
@@ -209,9 +209,8 @@ else:
                     for s in msg["sources"]:
                         idx = s["index"]
                         name = s["name"]
-                        drive_id = s.get("drive_id", "")
-                        if drive_id:
-                            url = f"https://drive.google.com/file/d/{drive_id}/view"
+                        url = s.get("url", "")
+                        if url:
                             st.markdown(f"**[{idx}]** [{name}]({url})")
                         else:
                             st.markdown(f"**[{idx}]** {name}")

@@ -13,8 +13,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from src.config import FAISS_DIR, BM25_DIR, MD_BACKUP_DIR
 from src.ingestion.md_loader import load_md_file
 
-_FIELDS_TO_PATCH = ["ref_number", "date", "topic", "source_url",
-                    "source_drive_id", "law_section", "tags", "category"]
+_FIELDS_TO_PATCH = ["ref_number", "date", "topic", "file_url",
+                    "file_id", "law_section", "tags", "category"]
 
 
 def _build_patch_lookup() -> dict[str, dict[int, dict]]:

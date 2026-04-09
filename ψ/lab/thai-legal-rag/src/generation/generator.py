@@ -184,12 +184,13 @@ def generate_answer(
     seen_sources = set()
     for chunk in chunks:
         name = chunk.get("source_name", "")
-        drive_id = chunk.get("source_drive_id", "")
+        file_id = chunk.get("file_id", "")
         if name and name not in seen_sources:
             seen_sources.add(name)
             sources.append({
                 "name": name,
-                "drive_id": drive_id,
+                "file_id": file_id,
+                "file_url": chunk.get("file_url", ""),
                 "category": chunk.get("category", ""),
             })
 

@@ -44,15 +44,15 @@ def print_chunk(i: int, chunk: dict):
     source = chunk.get("source_name", chunk.get("source", "unknown"))
     category = chunk.get("category", "")
     score = chunk.get("weighted_score", chunk.get("score", 0))
-    drive_id = chunk.get("source_drive_id", "")
+    file_url = chunk.get("file_url", "")
     text = chunk.get("text", "")
 
     print(f"\n[{i}] {source}")
     if category:
         print(f"    Category : {category}")
     print(f"    Score    : {score:.4f}")
-    if drive_id:
-        print(f"    Drive    : https://drive.google.com/file/d/{drive_id}/view")
+    if file_url:
+        print(f"    Drive    : {file_url}")
     print(f"    Text     : {text[:300]}{'...' if len(text) > 300 else ''}")
 
 

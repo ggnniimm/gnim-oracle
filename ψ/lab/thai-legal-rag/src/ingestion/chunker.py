@@ -20,7 +20,7 @@ class Chunk:
     text: str
     metadata: dict = field(default_factory=dict)
     # metadata keys used downstream:
-    #   source_drive_id, source_name, category, page_range, chunk_index
+    #   file_id, source_name, category, page_range, chunk_index
 
 
 class ThaiTextSplitter:
@@ -97,14 +97,14 @@ class ThaiTextSplitter:
 
 def chunk_document(
     text: str,
-    source_drive_id: str,
+    file_id: str,
     source_name: str,
     category: str,
 ) -> list[Chunk]:
     """Convenience wrapper: chunk a full document with standard metadata."""
     splitter = ThaiTextSplitter()
     base_meta = {
-        "source_drive_id": source_drive_id,
+        "file_id": file_id,
         "source_name": source_name,
         "category": category,
     }

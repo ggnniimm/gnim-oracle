@@ -159,7 +159,7 @@ def main():
                 chunks = load_md_file(_Path(tmp_path))
                 # Override metadata with known values
                 for c in chunks:
-                    c.metadata["source_drive_id"] = file_id
+                    c.metadata["file_id"] = file_id
                     c.metadata["source_name"] = file_name
                     if not c.metadata.get("category"):
                         c.metadata["category"] = category

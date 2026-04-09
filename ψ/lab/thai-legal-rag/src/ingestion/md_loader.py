@@ -152,9 +152,9 @@ def load_md_file(path: Path | str) -> list[Chunk]:
 
     # Normalize metadata keys to what the pipeline expects.
     base_meta = {
-        "source_drive_id": meta.get("file_id", ""),
+        "file_id": meta.get("file_id", ""),
         "source_name": meta.get("source_file") or meta.get("original_filename") or path.name,
-        "source_url": meta.get("file_url", ""),
+        "file_url": meta.get("file_url", ""),
         "category": meta.get("type") or meta.get("doc_type") or "ข้อหารือ กวจ.",
         "issued_by": meta.get("issued_by", ""),
         "date": str(meta.get("date", "")),
@@ -193,7 +193,7 @@ def _load_law_chunks(body: str, meta: dict, base_meta: dict, path: Path) -> list
 
     doc = LawDocument(
         filename=path.name,
-        file_id=base_meta.get("source_drive_id", ""),
+        file_id=base_meta.get("file_id", ""),
         law_name=law_name,
         law_short_name=law_short_name,
         law_type=law_type,

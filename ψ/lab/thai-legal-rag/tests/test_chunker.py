@@ -47,13 +47,13 @@ def test_chunker_metadata():
     """chunk_document should attach metadata to each chunk."""
     chunks = chunk_document(
         SAMPLE_THAI_TEXT,
-        source_drive_id="drive123",
+        file_id="drive123",
         source_name="test_doc.pdf",
         category="กรมบัญชีกลาง",
     )
     assert len(chunks) >= 1
     for chunk in chunks:
-        assert chunk.metadata["source_drive_id"] == "drive123"
+        assert chunk.metadata["file_id"] == "drive123"
         assert chunk.metadata["source_name"] == "test_doc.pdf"
         assert chunk.metadata["category"] == "กรมบัญชีกลาง"
         assert "chunk_index" in chunk.metadata
