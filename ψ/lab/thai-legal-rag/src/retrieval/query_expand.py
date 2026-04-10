@@ -8,7 +8,7 @@ import re
 from google.genai import types as genai_types
 
 from src.config import GEMINI_FLASH_MODEL
-from src.gemini_client import get_client
+from src.gemini_client import get_client, generate_with_retry
 from src.retrieval.glossary import glossary_expand
 
 logger = logging.getLogger(__name__)
@@ -54,7 +54,8 @@ def expand_query(query: str) -> list[str]:
     client = get_client()
 
     try:
-        response = client.models.generate_content(
+        response = generate_with_retry(
+            client,
             model=GEMINI_FLASH_MODEL,
             contents=_EXPAND_PROMPT.format(query=query),
             config=genai_types.GenerateContentConfig(temperature=0.2),

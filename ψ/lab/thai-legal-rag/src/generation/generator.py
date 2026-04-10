@@ -9,7 +9,7 @@ import logging
 from google.genai import types as genai_types
 
 from src.config import GEMINI_FLASH_MODEL
-from src.gemini_client import get_client
+from src.gemini_client import get_client, generate_with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -162,7 +162,8 @@ def generate_answer(
         contents = user_prompt
 
     try:
-        response = client.models.generate_content(
+        response = generate_with_retry(
+            client,
             model=GEMINI_FLASH_MODEL,
             contents=contents,
             config=genai_types.GenerateContentConfig(
