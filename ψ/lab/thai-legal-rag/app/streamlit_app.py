@@ -245,9 +245,8 @@ if question:
                         for s in source_list:
                             idx = s["index"]
                             name = s["name"]
-                            drive_id = s.get("drive_id", "")
-                            if drive_id:
-                                url = f"https://drive.google.com/file/d/{drive_id}/view"
+                            url = s.get("url", "")
+                            if url:
                                 st.markdown(f"**[{idx}]** [{name}]({url})")
                             else:
                                 st.markdown(f"**[{idx}]** {name}")
