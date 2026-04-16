@@ -1,4 +1,4 @@
-"""BM25 lexical search store — complements FAISS semantic search."""
+"""BM25 lexical search store — complements Qdrant vector search."""
 import pickle
 import logging
 from pathlib import Path

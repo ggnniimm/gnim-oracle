@@ -57,7 +57,7 @@ def main():
         cases = [c for c in cases if c["id"] == args.id]
 
     print("Loading index...", end=" ", flush=True)
-    index = IndexManager(use_lightrag=False)
+    index = IndexManager()
     retriever = Retriever(index)
     print("done", flush=True)
 

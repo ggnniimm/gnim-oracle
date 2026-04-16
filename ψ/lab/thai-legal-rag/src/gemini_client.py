@@ -61,7 +61,8 @@ def generate_with_retry(client: genai.Client, **kwargs):
                 return client.models.generate_content(**kwargs)
             except Exception as e:
                 err_str = str(e)
-                if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str or "RESOURCE_EXHAUSTED" in err_str:
+                err_lower = err_str.lower()
+                if any(k in err_lower for k in ("503", "429", "unavailable", "resource_exhausted", "timeout", "timed out", "stream idle")):
                     last_exc = e
                     if attempt + 1 < _MAX_RETRIES:
                         delay = _RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)

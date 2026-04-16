@@ -36,7 +36,7 @@ _retriever: Retriever | None = None
 def get_retriever() -> Retriever:
     global _retriever
     if _retriever is None:
-        index = IndexManager(use_lightrag=False)
+        index = IndexManager()
         _retriever = Retriever(index)
     return _retriever
 

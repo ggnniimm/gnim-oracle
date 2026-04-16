@@ -67,7 +67,7 @@ def parse_args():
     p = argparse.ArgumentParser(description="Index MD files into vector store")
     p.add_argument("--dir", required=True, type=Path, help="Directory containing .md files")
     p.add_argument("--dry-run", action="store_true", help="Show chunks without indexing")
-    p.add_argument("--no-lightrag", action="store_true", help="Skip LightRAG, vector store only")
+    p.add_argument("--no-lightrag", action="store_true", help="(deprecated, ignored)")
     p.add_argument(
         "--force-reindex",
         action="store_true",
@@ -112,21 +112,18 @@ def main():
                 print(f"    [{c.metadata.get('section','')}] {c.text[:80]}...")
         return
 
-    index = IndexManager(use_lightrag=not args.no_lightrag)
+    index = IndexManager()
 
     # --- force-reindex: purge old data before indexing ---
     if args.force_reindex:
-        vector_store = index.vector  # QdrantStore or FAISSStore
+        vector_store = index.vector
         for md_file in md_files:
             chunks = load_md_file(md_file)
             source_name = chunks[0].metadata.get("source_name") if chunks else md_file.name
 
-            # 1. Delete from vector store (Qdrant only — FAISS has no delete)
-            if hasattr(vector_store, "delete_by_source_name"):
-                n_vec = vector_store.delete_by_source_name(source_name)
-                print(f"  [{md_file.name}] Deleted {n_vec} vectors (source_name={source_name!r})")
-            else:
-                print(f"  [{md_file.name}] Vector store has no delete — skipping vector purge")
+            # 1. Delete from vector store
+            n_vec = vector_store.delete_by_source_name(source_name)
+            print(f"  [{md_file.name}] Deleted {n_vec} vectors (source_name={source_name!r})")
 
             # 2. Delete from dedup DB
             enriched_texts = []

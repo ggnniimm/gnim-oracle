@@ -1,5 +1,5 @@
 """
-Parallel retriever — queries FAISS and LightRAG simultaneously.
+Parallel retriever — queries Qdrant vector store and BM25 simultaneously.
 """
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import re
 from src.indexing.manager import IndexManager
 from src.retrieval.glossary import glossary_expand
 from src.retrieval.query_expand import expand_query, is_specific_query
-from src.config import FAISS_TOP_K, LIGHTRAG_TOP_K, ORIGINAL_QUERY_BOOST
+from src.config import VECTOR_TOP_K, ORIGINAL_QUERY_BOOST
 
 logger = logging.getLogger(__name__)
 
@@ -47,14 +47,13 @@ class Retriever:
         self,
         query: str,
         expand: bool = True,
-        faiss_k: int = FAISS_TOP_K,
-        lightrag_k: int = LIGHTRAG_TOP_K,
+        vector_k: int = VECTOR_TOP_K,
         history: list[dict] | None = None,
     ) -> dict[str, list[dict]]:
         payload_filter = _detect_payload_filter(query, history)
         """
         Async retrieval with optional query expansion.
-        Returns {"faiss": [...], "lightrag": [...]}.
+        Returns {"vector": [...], "bm25": [...]}.
         """
         specific = is_specific_query(query)
         if expand and not specific:
@@ -74,48 +73,40 @@ class Retriever:
 
         # Run all queries in parallel, collect all results
         async def _query_one(q: str) -> dict[str, list[dict]]:
-            return await self.index.query_async(q, faiss_k=faiss_k, lightrag_k=lightrag_k, payload_filter=payload_filter)
+            return await self.index.query_async(q, vector_k=vector_k, payload_filter=payload_filter)
 
         all_results = await asyncio.gather(*[_query_one(q) for q in queries])
 
         # Merge: deduplicate by text content.
         # Boost scores from the original query (index 0) so it dominates
         # over noise from expanded queries after reranker normalization.
-        merged_faiss: dict[str, dict] = {}
+        merged_vector: dict[str, dict] = {}
         merged_bm25: dict[str, dict] = {}
-        merged_lightrag: dict[str, dict] = {}
 
         for qi, result_set in enumerate(all_results):
             boost = ORIGINAL_QUERY_BOOST if qi == 0 else 1.0
-            for item in result_set.get("faiss", []):
+            for item in result_set.get("vector", []):
                 item = dict(item)
                 item["score"] = item.get("score", 0) * boost
                 key = item.get("text", "")[:100]
-                if key not in merged_faiss or item["score"] > merged_faiss[key]["score"]:
-                    merged_faiss[key] = item
+                if key not in merged_vector or item["score"] > merged_vector[key]["score"]:
+                    merged_vector[key] = item
             for item in result_set.get("bm25", []):
                 item = dict(item)
                 item["score"] = item.get("score", 0) * boost
                 key = item.get("text", "")[:100]
                 if key not in merged_bm25 or item["score"] > merged_bm25[key]["score"]:
                     merged_bm25[key] = item
-            for item in result_set.get("lightrag", []):
-                item = dict(item)
-                item["score"] = item.get("score", 0) * boost
-                key = item.get("text", "")[:100]
-                if key not in merged_lightrag or item["score"] > merged_lightrag[key]["score"]:
-                    merged_lightrag[key] = item
 
         if specific:
             # For ID/provision lookups, BM25 exact match is authoritative.
-            # FAISS embeddings of bare numbers return generic semantic matches that add noise.
-            logger.debug(f"Specific query — returning BM25 only (skipping FAISS)")
-            return {"faiss": [], "bm25": list(merged_bm25.values()), "lightrag": []}
+            # Vector embeddings of bare numbers return generic semantic matches that add noise.
+            logger.debug(f"Specific query — returning BM25 only (skipping vector)")
+            return {"vector": [], "bm25": list(merged_bm25.values())}
 
         return {
-            "faiss": list(merged_faiss.values()),
+            "vector": list(merged_vector.values()),
             "bm25": list(merged_bm25.values()),
-            "lightrag": list(merged_lightrag.values()),
         }
 
     def retrieve(self, query: str, expand: bool = True, history: list[dict] | None = None) -> dict[str, list[dict]]:

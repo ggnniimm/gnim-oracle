@@ -255,7 +255,7 @@ def main():
 
     print(f"\n  Total: {total_old:,} → {total_new:,} chars ({total_new/max(total_old,1):.1f}x improvement)")
     print(f"\n  Next: re-index with")
-    print(f"    THAI_RAG_DATA_DIR=$(pwd)/data python3 pipeline/index_md_folder.py --dir data/md_backup --no-lightrag")
+    print(f"    THAI_RAG_DATA_DIR=$(pwd)/data python3 pipeline/index_md_folder.py --dir data/md_backup")
 
 
 if __name__ == "__main__":

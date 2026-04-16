@@ -73,7 +73,21 @@ if not st.session_state.get("authentication_status"):
     tab_login, tab_register, tab_forgot = st.tabs(["เข้าสู่ระบบ", "สมัครสมาชิก", "ลืมรหัสผ่าน"])
 
     with tab_login:
-        authenticator.login()
+        try:
+            authenticator.login()
+        except Exception:
+            for key in ["authentication_status", "username", "name", "logout"]:
+                st.session_state.pop(key, None)
+            try:
+                authenticator.cookie_controller.delete_cookie()
+            except Exception:
+                pass
+            # Let browser execute cookie deletion JS, then reload after 1.5s
+            st.components.v1.html(
+                "<script>setTimeout(function(){parent.location.reload()},1500)</script>",
+                height=0,
+            )
+            st.stop()
         if st.session_state.get("authentication_status") is False:
             st.error("Username หรือ Password ไม่ถูกต้อง")
             col_forgot, col_reg = st.columns(2)
@@ -251,7 +265,7 @@ def _replace_refs(answer: str, chunk_to_src: dict[int, int]) -> str:
 
 @st.cache_resource(show_spinner="กำลังโหลด index...")
 def get_retriever():
-    index = IndexManager(use_lightrag=False)
+    index = IndexManager()
     return Retriever(index)
 
 

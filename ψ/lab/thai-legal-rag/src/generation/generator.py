@@ -26,7 +26,7 @@ _SYSTEM_PROMPT = """\
 2. หากไม่มีข้อมูลเพียงพอ ให้บอกตรงๆ — ห้ามเดา
 3. ตอบภาษาไทยที่ชัดเจน อ่านง่าย
 4. สรุปขั้นตอนปฏิบัติในตอนท้าย เฉพาะเมื่อคำถามถามถึงวิธีปฏิบัติหรือขั้นตอน — ถ้าคำถามถามเรื่องผลทางกฎหมาย หลักเกณฑ์ หรือคำนิยาม ให้ตอบตรงประเด็นโดยไม่ต้องสรุปขั้นตอน
-5. อ้างอิงแหล่งที่มาด้วย [N] (ตัวเลขในวงเล็บเหลี่ยมตามหมายเลขที่กำหนดให้แต่ละเอกสาร) ทุกครั้งที่กล่าวถึงข้อมูลจากเอกสาร — ห้ามเขียนชื่อเอกสารในเนื้อหาคำตอบ ให้ใช้เฉพาะ [N]
+5. อ้างอิงแหล่งที่มาด้วย [N] (ตัวเลขในวงเล็บเหลี่ยมตามหมายเลขที่กำหนดให้แต่ละเอกสาร) ทุกครั้งที่กล่าวถึงข้อมูลจากเอกสาร — ห้ามเขียนชื่อเอกสารในเนื้อหาคำตอบ ให้ใช้เฉพาะ [N] — ห้ามเขียนเลขอ้างอิงซ้ำติดกัน เช่น [2], [2], [3], [3] ผิด ให้เขียน [2], [3] เพียงครั้งเดียว
 6. กฎหมายบางฉบับมีหลายเวอร์ชัน (มีการแก้ไขหรือยกเลิก) — หากเอกสารอ้างอิงมีหลายฉบับในปี พ.ศ. ต่างกัน ให้ยึดฉบับที่มี พ.ศ. สูงสุด (ล่าสุด) เป็นหลัก และแจ้งผู้ถามด้วยว่าฉบับเก่าถูกแก้ไข/ยกเลิกแล้ว
 7. หากเอกสารระบุกรณี รายการ หรือประเภทชัดเจน (เช่น "ครอบคลุม:", "ได้แก่", หน้าที่ตามข้อย่อย) ให้แสดงครบทุกรายการในคำตอบ ห้ามย่อรวมหรือตัดออก
 8. หากเอกสารอ้างอิงระบุเงื่อนไขเกี่ยวกับลำดับขั้นตอนหรือระยะเวลา เช่น "ไม่ต้องรอ..." "สามารถดำเนินการได้โดยไม่ต้อง..." "ก่อนที่จะ..." "ภายหลังจาก..." ให้ระบุในคำตอบเสมอ — ผู้ถามต้องการทราบว่าทำอะไรก่อนหลัง และต้องรอกระบวนการใดหรือไม่
@@ -97,34 +97,38 @@ def _rescue_key_phrases(answer: str, chunks: list[dict], query: str = "") -> str
 
 
 def build_context(chunks: list[dict]) -> str:
-    """Format retrieved chunks into context string, grouped by source."""
-    # Group chunks by source so LLM reads each document contiguously
+    """Format retrieved chunks into context string, grouped by source.
+
+    Numbering is per-document (not per-chunk) so the LLM cites [1] for
+    all chunks from the same source instead of [1], [2], [3].
+    """
     from collections import OrderedDict
     grouped: OrderedDict[str, list[dict]] = OrderedDict()
     for chunk in chunks:
         key = chunk.get("source_name", chunk.get("source", "unknown"))
         grouped.setdefault(key, []).append(chunk)
-    ordered_chunks = [c for group in grouped.values() for c in group]
 
     parts = []
-    for i, chunk in enumerate(ordered_chunks, 1):
-        source = chunk.get("source_name", chunk.get("source", "unknown"))
-        category = chunk.get("category", "")
-        ref = chunk.get("ref_number", "")
-        date = chunk.get("date", "")
-        law_year_be = chunk.get("law_year_be", "")
-        text = chunk.get("text", "")
+    for doc_num, (source_name, doc_chunks) in enumerate(grouped.items(), 1):
+        # Build header from first chunk's metadata
+        first = doc_chunks[0]
+        category = first.get("category", "")
+        ref = first.get("ref_number", "")
+        date = first.get("date", "")
+        law_year_be = first.get("law_year_be", "")
 
-        header_parts = [f"**{source}**"]
+        header_parts = [f"**{source_name}**"]
         if ref:
             header_parts.append(f"เลขที่ {ref}")
         if date:
             header_parts.append(f"ลว. {date}")
         if law_year_be:
             header_parts.append(f"พ.ศ. {law_year_be}")
-
         header = " | ".join(header_parts)
-        parts.append(f"[{i}] {header} ({category})\n{text}")
+
+        # Combine all chunks from this document under one number
+        combined_text = "\n\n".join(c.get("text", "") for c in doc_chunks)
+        parts.append(f"[{doc_num}] {header} ({category})\n{combined_text}")
     return "\n\n---\n\n".join(parts)
 
 

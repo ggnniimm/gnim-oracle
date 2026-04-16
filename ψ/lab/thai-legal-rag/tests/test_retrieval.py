@@ -16,13 +16,13 @@ def test_reranker_merge():
     from src.retrieval.reranker import rerank
 
     results = {
-        "faiss": [
-            {"text": "ระเบียบค่าปรับผิดสัญญา", "score": 0.9, "source": "faiss", "source_name": "doc1.pdf"},
-            {"text": "มาตรา 10 กำหนดหน้าที่คณะกรรมการ", "score": 0.7, "source": "faiss", "source_name": "doc2.pdf"},
+        "vector": [
+            {"text": "ระเบียบค่าปรับผิดสัญญา", "score": 0.9, "source": "vector", "source_name": "doc1.pdf"},
+            {"text": "มาตรา 10 กำหนดหน้าที่คณะกรรมการ", "score": 0.7, "source": "vector", "source_name": "doc2.pdf"},
         ],
-        "lightrag": [
-            {"text": "ระเบียบค่าปรับผิดสัญญา", "score": 0.85, "source": "lightrag", "source_name": "LightRAG"},
-            {"text": "การบริหารพัสดุภาครัฐ พ.ศ. 2560", "score": 0.6, "source": "lightrag", "source_name": "LightRAG"},
+        "bm25": [
+            {"text": "ระเบียบค่าปรับผิดสัญญา", "score": 0.85, "source": "bm25", "source_name": "doc1.pdf"},
+            {"text": "การบริหารพัสดุภาครัฐ พ.ศ. 2560", "score": 0.6, "source": "bm25", "source_name": "doc3.pdf"},
         ],
     }
 
@@ -46,8 +46,8 @@ def test_reranker_dedup():
     duplicate_text = "ค่าปรับกรณีผิดสัญญา" * 10
 
     results = {
-        "faiss": [{"text": duplicate_text, "score": 0.9, "source": "faiss"}],
-        "lightrag": [{"text": duplicate_text, "score": 0.8, "source": "lightrag"}],
+        "vector": [{"text": duplicate_text, "score": 0.9, "source": "vector"}],
+        "bm25": [{"text": duplicate_text, "score": 0.8, "source": "bm25"}],
     }
 
     ranked = rerank(results, top_k=5)
@@ -60,7 +60,7 @@ def test_reranker_empty():
     from src.retrieval.reranker import rerank
 
     assert rerank({}, top_k=5) == []
-    assert rerank({"faiss": [], "lightrag": []}, top_k=5) == []
+    assert rerank({"vector": [], "bm25": []}, top_k=5) == []
 
 
 @pytest.mark.skipif(

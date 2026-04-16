@@ -18,7 +18,7 @@ from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
 from src.generation.generator import generate_answer
-from src.config import FAISS_TOP_K
+from src.config import VECTOR_TOP_K
 
 logging.basicConfig(
     level=logging.WARNING,
@@ -31,7 +31,7 @@ def parse_args():
     p.add_argument("query", nargs="?", help="Query string (Thai)")
     p.add_argument("--no-generate", action="store_true", help="Skip LLM answer, show chunks only")
     p.add_argument("--no-expand", action="store_true", help="Skip query expansion")
-    p.add_argument("--top-k", type=int, default=FAISS_TOP_K, help=f"Top-k (default {FAISS_TOP_K})")
+    p.add_argument("--top-k", type=int, default=VECTOR_TOP_K, help=f"Top-k (default {VECTOR_TOP_K})")
     p.add_argument("--verbose", "-v", action="store_true", help="Show debug logs")
     return p.parse_args()
 
@@ -82,7 +82,7 @@ def main():
     # --- Load index ---
     print("Loading index...", end=" ", flush=True)
     try:
-        index = IndexManager(use_lightrag=False)
+        index = IndexManager()
     except Exception as e:
         print(f"\nFailed to load index: {e}")
         sys.exit(1)
@@ -98,9 +98,9 @@ def main():
         print(f"\nRetrieval failed: {e}")
         sys.exit(1)
 
-    faiss_count = len(raw_results.get("faiss", []))
+    vector_count = len(raw_results.get("vector", []))
     bm25_count = len(raw_results.get("bm25", []))
-    print(f"done (vector: {faiss_count}, BM25: {bm25_count})")
+    print(f"done (vector: {vector_count}, BM25: {bm25_count})")
 
     ranked = rerank(raw_results, query=args.query)
     print(f"Top {len(ranked)} chunks after reranking:")
