@@ -1,7 +1,6 @@
 """
 Qdrant vector store backed by Gemini embeddings.
 In-memory mode with optional disk persistence.
-Drop-in replacement for FAISSStore.
 """
 from __future__ import annotations
 
@@ -14,7 +13,7 @@ from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, Fi
 
 from src.config import (
     EMBEDDING_DIM,
-    FAISS_TOP_K,
+    VECTOR_TOP_K,
     GEMINI_EMBEDDING_MODEL,
     QDRANT_PATH,
     QDRANT_URL,
@@ -122,7 +121,7 @@ class QdrantStore:
                     f"{(len(texts) - 1) // batch_size + 1} ({len(batch_texts)} texts)"
                 )
 
-    def search(self, query: str, k: int = FAISS_TOP_K, payload_filter: dict | None = None) -> list[dict]:
+    def search(self, query: str, k: int = VECTOR_TOP_K, payload_filter: dict | None = None) -> list[dict]:
         """Returns list of {text, score, **metadata}."""
         total = self._client.get_collection(_COLLECTION).points_count
         if total == 0:
@@ -143,7 +142,7 @@ class QdrantStore:
         for hit in response.points:
             item = dict(hit.payload)
             item["score"] = float(hit.score)
-            item["source"] = "faiss"  # keep compatible with reranker weight keys
+            item["source"] = "vector"
             results.append(item)
         return results
 

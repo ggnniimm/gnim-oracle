@@ -73,7 +73,18 @@ if not st.session_state.get("authentication_status"):
     tab_login, tab_register, tab_forgot = st.tabs(["เข้าสู่ระบบ", "สมัครสมาชิก", "ลืมรหัสผ่าน"])
 
     with tab_login:
-        authenticator.login()
+        try:
+            authenticator.login()
+        except Exception:
+            for key in ["authentication_status", "username", "name", "logout"]:
+                st.session_state.pop(key, None)
+            # Delete stale auth cookie via JS then reload — prevents infinite rerun loop
+            cookie_name = _auth_config["cookie"]["name"]
+            st.markdown(
+                f"""<meta http-equiv="refresh" content="1">
+                <script>document.cookie="{cookie_name}=; Max-Age=0; path=/";</script>""",
+                unsafe_allow_html=True,
+            )
         if st.session_state.get("authentication_status") is False:
             st.error("Username หรือ Password ไม่ถูกต้อง")
             col_forgot, col_reg = st.columns(2)
@@ -251,7 +262,7 @@ def _replace_refs(answer: str, chunk_to_src: dict[int, int]) -> str:
 
 @st.cache_resource(show_spinner="กำลังโหลด index...")
 def get_retriever():
-    index = IndexManager(use_lightrag=False)
+    index = IndexManager()
     return Retriever(index)
 
 

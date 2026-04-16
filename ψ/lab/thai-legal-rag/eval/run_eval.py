@@ -259,7 +259,7 @@ def _run_case_wrapper(args_tuple):
     case, generate = args_tuple
     # Each worker needs its own IndexManager (Qdrant client not fork-safe)
     if not hasattr(_run_case_wrapper, "_retriever"):
-        idx = IndexManager(use_lightrag=False)
+        idx = IndexManager()
         _run_case_wrapper._retriever = Retriever(idx)
     return run_case(case, _run_case_wrapper._retriever, generate)
 
@@ -284,7 +284,7 @@ def main():
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         print(f"\nLoading index...", end=" ", flush=True)
-        index = IndexManager(use_lightrag=False)
+        index = IndexManager()
         retriever = Retriever(index)
         print("done")
 
@@ -320,7 +320,7 @@ def main():
                 results.append(results_map[case["id"]])
     else:
         print(f"\nLoading index...", end=" ", flush=True)
-        index = IndexManager(use_lightrag=False)
+        index = IndexManager()
         retriever = Retriever(index)
         print("done")
 

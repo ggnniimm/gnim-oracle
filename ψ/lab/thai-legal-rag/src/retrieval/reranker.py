@@ -19,8 +19,7 @@ from src.config import BM25_WEIGHT, MMR_INJECT_EXTRAS, MMR_LAMBDA, RERANK_TOP_K,
 logger = logging.getLogger(__name__)
 
 _SOURCE_WEIGHTS = {
-    "faiss": 1.0,
-    "lightrag": 0.9,
+    "vector": 1.0,
     "bm25": BM25_WEIGHT,
 }
 
@@ -77,7 +76,7 @@ def rerank(
     query: str = "",
 ) -> list[dict]:
     """
-    Fuse FAISS + BM25 + LightRAG results, deduplicate, MMR-select, source-complete.
+    Fuse vector + BM25 results, deduplicate, MMR-select, source-complete.
     query: original query string, used for glossary-based injection from dedup pool.
     """
     all_items: list[dict] = []

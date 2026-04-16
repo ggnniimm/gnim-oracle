@@ -47,7 +47,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--no-lightrag",
         action="store_true",
-        help="Skip LightRAG indexing (FAISS only, faster)",
+        help="(deprecated, ignored)",
     )
     p.add_argument(
         "--topic-filter",
@@ -112,7 +112,7 @@ def main():
             print(f"  [{f['mimeType'].split('/')[-1]}] {f['name']} ({f['id']})")
         return
 
-    index = IndexManager(use_lightrag=not args.no_lightrag)
+    index = IndexManager()
     failed: list[str] = []
     indexed_count = 0
     skipped_count = 0
@@ -182,7 +182,7 @@ def main():
                 skipped_count += 1
                 continue
 
-            # Batch add to FAISS
+            # Batch add to vector store
             index.add_batch(new_chunks, new_metas)
 
             # Mark as indexed
@@ -199,7 +199,7 @@ def main():
             logger.error(f"Failed: {file_name} ({file_id}): {e}")
             failed.append(file_id)
 
-    # Save FAISS index
+    # Save index
     index.save()
 
     # Write failed log

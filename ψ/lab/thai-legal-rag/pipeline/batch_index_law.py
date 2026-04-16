@@ -8,7 +8,6 @@ Processes all PDFs in the Drive "Law" folder:
 Usage:
     python batch_index_law.py
     python batch_index_law.py --dry-run
-    python batch_index_law.py --no-lightrag
     python batch_index_law.py --force     # ignore cache, re-extract all
     python batch_index_law.py --file-id FILE_ID   # single file only
 
@@ -43,7 +42,7 @@ logger = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser(description="Index Thai law PDFs from Google Drive")
     p.add_argument("--dry-run", action="store_true", help="Show files/sections without indexing")
-    p.add_argument("--no-lightrag", action="store_true", help="FAISS only (skip LightRAG)")
+    p.add_argument("--no-lightrag", action="store_true", help="(deprecated, ignored)")
     p.add_argument("--force", action="store_true", help="Re-extract even if cached")
     p.add_argument("--file-id", help="Process a single file by Drive ID")
     return p.parse_args()
@@ -90,7 +89,7 @@ def main():
         return
 
     # ── Index ───────────────────────────────────────────────────────────────
-    index = IndexManager(use_lightrag=not args.no_lightrag)
+    index = IndexManager()
     failed: list[str] = []
     total_new = 0
     total_skip = 0

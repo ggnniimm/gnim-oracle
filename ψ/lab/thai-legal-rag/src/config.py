@@ -31,8 +31,6 @@ DRIVE_FOLDER_IDS: dict[str, str] = {
 
 # --- Storage paths ---
 BASE_DIR = Path(os.getenv("THAI_RAG_DATA_DIR", "/tmp/thai-legal-rag"))
-FAISS_DIR = BASE_DIR / "faiss_index"
-LIGHTRAG_DIR = BASE_DIR / "lightrag_index"
 BM25_DIR = BASE_DIR / "bm25_index"
 QDRANT_URL = os.getenv("QDRANT_URL", "")  # e.g. http://localhost:6333 — if set, use server mode
 QDRANT_PATH = BASE_DIR / "qdrant_store"  # used only when QDRANT_URL is not set
@@ -41,12 +39,8 @@ OCR_CACHE_DIR = BASE_DIR / "ocr_cache"
 MD_BACKUP_DIR = BASE_DIR / "md_backup"
 FAILED_LOG_DIR = BASE_DIR / "failed_logs"
 
-# --- Vector backend ---
-# "qdrant" or "faiss" — switch via env var
-VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "qdrant")
-
 # Create dirs on import
-for _d in [FAISS_DIR, LIGHTRAG_DIR, BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
+for _d in [BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
     _d.mkdir(parents=True, exist_ok=True)
 
 # --- Models ---
@@ -59,8 +53,7 @@ CHUNK_SIZE = 400       # tokens / chars
 CHUNK_OVERLAP = 100
 
 # --- Retrieval ---
-FAISS_TOP_K = 80
-LIGHTRAG_TOP_K = 10
+VECTOR_TOP_K = 80
 BM25_TOP_K = 40
 BM25_WEIGHT = 0.9  # keyword match nearly equals semantic — high recall
 RERANK_TOP_K = 15

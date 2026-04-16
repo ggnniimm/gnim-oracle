@@ -91,7 +91,7 @@ with st.sidebar:
 
 @st.cache_resource(show_spinner="กำลังโหลด index...")
 def get_retriever():
-    index = IndexManager(use_lightrag=False)
+    index = IndexManager()
     return Retriever(index)
 
 
