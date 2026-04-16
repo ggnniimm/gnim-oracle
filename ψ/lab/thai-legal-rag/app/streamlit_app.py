@@ -76,9 +76,36 @@ if not st.session_state.get("authentication_status"):
         authenticator.login()
         if st.session_state.get("authentication_status") is False:
             st.error("Username หรือ Password ไม่ถูกต้อง")
-            st.markdown("ยังไม่ได้สมัครสมาชิกใช่ไหม?")
-            if st.button("➡️ สมัครสมาชิกเลย", type="primary"):
-                st.session_state["show_inline_register"] = True
+            col_forgot, col_reg = st.columns(2)
+            with col_forgot:
+                st.markdown("ลืมรหัสผ่าน?")
+                if st.button("🔑 ลืมรหัสผ่าน", key="goto_forgot"):
+                    st.session_state["show_inline_forgot"] = True
+                    st.session_state["show_inline_register"] = False
+                    st.rerun()
+            with col_reg:
+                st.markdown("ยังไม่ได้สมัครสมาชิก ใช่ไหม?")
+                if st.button("➡️ สมัครสมาชิกเลย", type="primary", key="goto_register"):
+                    st.session_state["show_inline_register"] = True
+                    st.session_state["show_inline_forgot"] = False
+                    st.rerun()
+            if st.session_state.get("show_inline_forgot"):
+                st.divider()
+                st.markdown("#### ลืมรหัสผ่าน")
+                try:
+                    username_forgot, email_forgot, new_password = authenticator.forgot_password(
+                        captcha=False, key="inline_forgot"
+                    )
+                    if username_forgot:
+                        with open(_AUTH_CONFIG_PATH, "w") as f:
+                            yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                        st.success(f"รหัสผ่านใหม่ของ **{username_forgot}**:")
+                        st.code(new_password)
+                        st.caption("กรุณาจดรหัสผ่านนี้ไว้ แล้วไปเปลี่ยนหลัง login")
+                    elif username_forgot is False:
+                        st.error("ไม่พบ username นี้ในระบบ")
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาด: {e}")
             if st.session_state.get("show_inline_register"):
                 st.divider()
                 st.markdown("#### สมัครสมาชิก")
