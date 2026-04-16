@@ -78,13 +78,16 @@ if not st.session_state.get("authentication_status"):
         except Exception:
             for key in ["authentication_status", "username", "name", "logout"]:
                 st.session_state.pop(key, None)
-            # Delete stale auth cookie via JS then reload — prevents infinite rerun loop
-            cookie_name = _auth_config["cookie"]["name"]
-            st.markdown(
-                f"""<meta http-equiv="refresh" content="1">
-                <script>document.cookie="{cookie_name}=; Max-Age=0; path=/";</script>""",
-                unsafe_allow_html=True,
+            try:
+                authenticator.cookie_controller.delete_cookie()
+            except Exception:
+                pass
+            # Let browser execute cookie deletion JS, then reload after 1.5s
+            st.components.v1.html(
+                "<script>setTimeout(function(){parent.location.reload()},1500)</script>",
+                height=0,
             )
+            st.stop()
         if st.session_state.get("authentication_status") is False:
             st.error("Username หรือ Password ไม่ถูกต้อง")
             col_forgot, col_reg = st.columns(2)
