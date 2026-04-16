@@ -2,3 +2,25 @@
 ψ/learn/**/origin
 credentials.json
 token.json
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+# macOS
+.DS_Store
+
+# Claude harness cache (local session state)
+.claude/projects/
+
+# Large data archives (indexes, dedup DBs — ~1.8 GB)
+ψ/archive/
+
+# Auth secrets
+ψ/lab/thai-legal-rag/app/auth_config.yaml
+
+# Next.js UI build artifacts
+ψ/lab/thai-legal-rag/ui/node_modules/
+ψ/lab/thai-legal-rag/ui/.next/

@@ -6,6 +6,7 @@ Usage:
     THAI_RAG_DATA_DIR=$(pwd)/data streamlit run app/streamlit_app.py
 """
 import json
+import os
 import re
 import sys
 import time
@@ -14,6 +15,13 @@ from collections import OrderedDict
 from pathlib import Path
 
 import streamlit as st
+import streamlit_authenticator as stauth
+import streamlit_authenticator.utilities.validator as _stauth_validator
+import yaml
+
+# Remove all password restrictions
+_stauth_validator.Validator.diagnose_password = lambda self, password: ""
+_stauth_validator.Validator.validate_password = lambda self, password: True
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -29,11 +37,127 @@ st.set_page_config(
     layout="wide",
 )
 
+
+def _translate_register_error(msg: str) -> str:
+    _map = {
+        "Username/email already taken": "Username หรือ Email นี้มีอยู่แล้วในระบบ",
+        "Email already taken": "Email นี้มีอยู่แล้วในระบบ",
+        "Username is not valid": "Username ไม่ถูกต้อง (ใช้ตัวอักษรและตัวเลขเท่านั้น)",
+        "Email is not valid": "รูปแบบ Email ไม่ถูกต้อง",
+        "First name is not valid": "ชื่อไม่ถูกต้อง",
+        "Last name is not valid": "นามสกุลไม่ถูกต้อง",
+        "Passwords do not match": "รหัสผ่านไม่ตรงกัน",
+        "Password/repeat password fields cannot be empty": "กรุณากรอกรหัสผ่านให้ครบ",
+    }
+    for key, thai in _map.items():
+        if key in msg:
+            return thai
+    return f"เกิดข้อผิดพลาด: {msg}"
+
+
+# ── Auth ────────────────────────────────────────────────────────────────────────
+
+_AUTH_CONFIG_PATH = Path(__file__).parent / "auth_config.yaml"
+
+with open(_AUTH_CONFIG_PATH) as f:
+    _auth_config = yaml.safe_load(f)
+
+authenticator = stauth.Authenticate(
+    _auth_config["credentials"],
+    _auth_config["cookie"]["name"],
+    _auth_config["cookie"]["key"],
+    _auth_config["cookie"]["expiry_days"],
+)
+
+if not st.session_state.get("authentication_status"):
+    tab_login, tab_register, tab_forgot = st.tabs(["เข้าสู่ระบบ", "สมัครสมาชิก", "ลืมรหัสผ่าน"])
+
+    with tab_login:
+        authenticator.login()
+        if st.session_state.get("authentication_status") is False:
+            st.error("Username หรือ Password ไม่ถูกต้อง")
+            col_forgot, col_reg = st.columns(2)
+            with col_forgot:
+                st.markdown("ลืมรหัสผ่าน?")
+                if st.button("🔑 ลืมรหัสผ่าน", key="goto_forgot"):
+                    st.session_state["show_inline_forgot"] = True
+                    st.session_state["show_inline_register"] = False
+                    st.rerun()
+            with col_reg:
+                st.markdown("ยังไม่ได้สมัครสมาชิก ใช่ไหม?")
+                if st.button("➡️ สมัครสมาชิกเลย", type="primary", key="goto_register"):
+                    st.session_state["show_inline_register"] = True
+                    st.session_state["show_inline_forgot"] = False
+                    st.rerun()
+            if st.session_state.get("show_inline_forgot"):
+                st.divider()
+                st.markdown("#### ลืมรหัสผ่าน")
+                try:
+                    username_forgot, email_forgot, new_password = authenticator.forgot_password(
+                        captcha=False, key="inline_forgot"
+                    )
+                    if username_forgot:
+                        with open(_AUTH_CONFIG_PATH, "w") as f:
+                            yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                        st.success(f"รหัสผ่านใหม่ของ **{username_forgot}**:")
+                        st.code(new_password)
+                        st.caption("กรุณาจดรหัสผ่านนี้ไว้ แล้วไปเปลี่ยนหลัง login")
+                    elif username_forgot is False:
+                        st.error("ไม่พบ username นี้ในระบบ")
+                except Exception as e:
+                    st.error(f"เกิดข้อผิดพลาด: {e}")
+            if st.session_state.get("show_inline_register"):
+                st.divider()
+                st.markdown("#### สมัครสมาชิก")
+                try:
+                    email, username, name = authenticator.register_user(
+                        pre_authorized=None,
+                        captcha=False,
+                        key="inline_register",
+                    )
+                    if username:
+                        with open(_AUTH_CONFIG_PATH, "w") as f:
+                            yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                        st.session_state["show_inline_register"] = False
+                        st.success(f"สมัครสำเร็จ ({username}) กรุณา login ด้านบน")
+                except Exception as e:
+                    st.error(_translate_register_error(str(e)))
+
+    with tab_register:
+        try:
+            email, username, name = authenticator.register_user(
+                pre_authorized=None,
+                captcha=False,
+            )
+            if username:
+                with open(_AUTH_CONFIG_PATH, "w") as f:
+                    yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                st.success(f"สมัครสมาชิกสำเร็จ ({username}) กรุณาไปที่ tab 'เข้าสู่ระบบ'")
+        except Exception as e:
+            st.error(_translate_register_error(str(e)))
+
+    with tab_forgot:
+        try:
+            username, email, new_password = authenticator.forgot_password(captcha=False)
+            if username:
+                with open(_AUTH_CONFIG_PATH, "w") as f:
+                    yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                st.success(f"รหัสผ่านใหม่ของ **{username}**:")
+                st.code(new_password)
+                st.caption("กรุณาจดรหัสผ่านนี้ไว้ แล้วไปเปลี่ยนหลัง login")
+            elif username is False:
+                st.error("ไม่พบ username นี้ในระบบ")
+        except Exception as e:
+            st.error(f"เกิดข้อผิดพลาด: {e}")
+
+    st.stop()
+
+_USERNAME = st.session_state.get("username", "guest")
+
 # ── Chat persistence ────────────────────────────────────────────────────────────
 
-import os
 _DATA_DIR = Path(os.getenv("THAI_RAG_DATA_DIR", "data"))
-_CHAT_STORE = _DATA_DIR / "chat_sessions.json"
+_CHAT_STORE = _DATA_DIR / f"chat_sessions_{_USERNAME}.json"
 
 
 def _load_chats() -> dict:
@@ -184,14 +308,19 @@ with st.sidebar:
                 st.rerun()
 
     st.divider()
-    with st.expander("ℹ️ เกี่ยวกับระบบ"):
-        st.markdown("""
-**Thai Legal RAG**
-- Vector: Qdrant + BM25 hybrid
-- Embedding: gemini-embedding-2-preview
-- LLM: Gemini 2.0 Flash
-- Persona: นิติกรชำนาญการพิเศษ
-        """)
+    with st.popover(f"👤 {st.session_state.get('name', _USERNAME)}", use_container_width=True):
+        st.caption(f"@{_USERNAME}")
+        st.divider()
+        authenticator.logout(button_name="ออกจากระบบ", location="main")
+        st.divider()
+        st.markdown("**🔑 เปลี่ยนรหัสผ่าน**")
+        try:
+            if authenticator.reset_password(_USERNAME, key="sidebar_reset"):
+                with open(_AUTH_CONFIG_PATH, "w") as f:
+                    yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                st.success("เปลี่ยนรหัสผ่านสำเร็จ")
+        except Exception as e:
+            st.error(str(e))
 
 # ── Main chat area ─────────────────────────────────────────────────────────────
 
