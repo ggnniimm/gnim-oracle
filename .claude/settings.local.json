@@ -115,7 +115,25 @@
       "WebFetch(domain:www.yotathai.com)",
       "WebFetch(domain:fidic.org)",
       "WebFetch(domain:www.instituteccp.com)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(rm:*)",
+      "Bash(node:*)",
+      "Bash(for f in \"03_กวจ_52101_121164_ข้อหารือการขยายเวลาฯ.md\" \"01_กวจ_ว126_170269_ซ้อมความเข้าใจเหตุแห่งการพิจารณาบอกเลิกสัญญา+หรือข้อตกลงฯ.md\" \"01_กวจ_ว130_190269_แนวทางปฏิบัติในการกำหนดหลักเกณฑ์และสิทธิฯ.md\" \"02_กวจ_51349_101164_ข้อหารือวิธีการคำนวณค่าปรับ.md\")",
+      "Bash(do echo \"=== $f ===\")",
+      "Read(//Users/mingsaksaengwilaipon/gnim-oracle/ψ/lab/thai-legal-rag/data/md_backup/**)",
+      "Bash(PSI=\"/Users/mingsaksaengwilaipon/gnim-oracle/ψ\")",
+      "Read(//Users/mingsaksaengwilaipon/gnim-oracle/$PSI/inbox/**)",
+      "Bash(kill 15931 && echo \"killed old rebuild \\(PID 15931\\)\")",
+      "Bash(kill 18992 && echo \"killed second rebuild too — will restart clean\")",
+      "Bash(for f:*)",
+      "Bash(do echo:*)",
+      "Bash(cat ψ/memory/learnings/2026-03-12_crossref-stable-anchor-docs.md | python3 -c \"\nimport sys, json\ncontent = sys.stdin.read\\(\\)\npayload = {\n    'pattern': content,\n    'concepts': ['cross-reference', 'retrieval', 'stable-anchor', 'ว647', 'old-framework-mapping', 'thai-procurement-law'],\n    'source': 'rrr: gnim-oracle'\n}\nprint\\(json.dumps\\(payload, ensure_ascii=False, indent=2\\)\\)\n\" 2>/dev/null || echo '\\(oracle_learn: logged locally\\)')",
+      "WebFetch(domain:python-client.qdrant.tech)",
+      "Read(//Users/mingsaksaengwilaipon/gnim-oracle-qdrant/**)",
+      "Bash(pip install:*)",
+      "Bash(pip3 install:*)",
+      "Bash(pip3 show:*)",
+      "WebFetch(domain:ai.google.dev)"
     ]
   }
 }
