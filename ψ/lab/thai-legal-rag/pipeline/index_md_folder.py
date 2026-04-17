@@ -67,7 +67,6 @@ def parse_args():
     p = argparse.ArgumentParser(description="Index MD files into vector store")
     p.add_argument("--dir", required=True, type=Path, help="Directory containing .md files")
     p.add_argument("--dry-run", action="store_true", help="Show chunks without indexing")
-    p.add_argument("--no-lightrag", action="store_true", help="(deprecated, ignored)")
     p.add_argument(
         "--force-reindex",
         action="store_true",

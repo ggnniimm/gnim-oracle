@@ -45,11 +45,6 @@ def parse_args() -> argparse.Namespace:
         help="Path to failed_TIMESTAMP.txt — retry only those file IDs",
     )
     p.add_argument(
-        "--no-lightrag",
-        action="store_true",
-        help="(deprecated, ignored)",
-    )
-    p.add_argument(
         "--topic-filter",
         type=str,
         default=None,
