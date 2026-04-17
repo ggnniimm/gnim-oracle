@@ -73,8 +73,7 @@ python pipeline/batch_index.py --folder-id FOLDER_ID --category กรมบั�
 python pipeline/batch_index.py --folder-id FOLDER_ID --category กรมบัญชีกลาง \
   --retry-file /tmp/thai-legal-rag/failed_logs/failed_20260213_120000.txt
 
-# FAISS only (skip LightRAG, faster)
-python pipeline/batch_index.py --folder-id FOLDER_ID --category กรมบัญชีกลาง --no-lightrag
+python pipeline/batch_index.py --folder-id FOLDER_ID --category กรมบัญชีกลาง
 ```
 
 ## Tests

@@ -42,7 +42,6 @@ logger = logging.getLogger(__name__)
 def parse_args():
     p = argparse.ArgumentParser(description="Index Thai law PDFs from Google Drive")
     p.add_argument("--dry-run", action="store_true", help="Show files/sections without indexing")
-    p.add_argument("--no-lightrag", action="store_true", help="(deprecated, ignored)")
     p.add_argument("--force", action="store_true", help="Re-extract even if cached")
     p.add_argument("--file-id", help="Process a single file by Drive ID")
     return p.parse_args()
