@@ -748,15 +748,6 @@ with st.sidebar:
         st.markdown(_profile_html, unsafe_allow_html=True)
     with col_gear:
         with st.popover("⚙", use_container_width=True):
-            st.markdown("**ตำแหน่ง / หน่วยงาน**")
-            new_pos = st.text_input("ตำแหน่ง", value=_position, placeholder="เช่น นักวิชาการพัสดุ - กปน.", key="edit_position")
-            if st.button("บันทึก", key="save_position"):
-                _auth_config["credentials"]["usernames"][_USERNAME]["position"] = new_pos
-                with open(_AUTH_CONFIG_PATH, "w") as f:
-                    yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
-                st.success("บันทึกแล้ว")
-                st.rerun()
-            st.divider()
             st.markdown("**🔑 เปลี่ยนรหัสผ่าน**")
             try:
                 if authenticator.reset_password(_USERNAME, key="sidebar_reset"):
