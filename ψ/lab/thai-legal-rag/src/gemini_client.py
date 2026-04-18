@@ -23,7 +23,6 @@ _RETRY_BASE_DELAY = 1  # seconds — exponential: 1, 2, 4, 8 + jitter
 # Fallback models when primary is overloaded
 _FALLBACK_MODELS = [
     "gemini-2.5-flash-lite",
-    "gemini-2.0-flash-lite",
 ]
 
 
