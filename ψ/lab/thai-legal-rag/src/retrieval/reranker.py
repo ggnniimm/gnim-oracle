@@ -30,6 +30,16 @@ _CATEGORY_BOOST = {
     "สำนักงานอัยการสูงสุด": 1.05,
 }
 
+# Canonical source boost — when ALL query keywords match, boost the primary document
+# so it ranks above secondary sources that naturally discuss the same principle.
+# Format: (query_keywords_all_must_match, source_name_substring, boost_factor)
+_CANONICAL_BOOSTS: list[tuple[list[str], str, float]] = [
+    # 22315 is canonical for แก้ไขสัญญา + ตรวจรับงวดสุดท้าย principle.
+    # Needed because newer secondary sources (51385/2025, 1758) outscore it via recency boost.
+    # Format: (query_keywords_all_must_match, source_name_substring, boost_factor)
+    (["ตรวจรับ", "งวดสุดท้าย"], "22315", 1.06),
+]
+
 
 def _jaccard(a: str, b: str) -> float:
     """Token-level Jaccard similarity between two Thai texts."""
@@ -103,6 +113,14 @@ def rerank(
                     item["weighted_score"] *= (1.0 + RECENCY_BOOST * age_factor)
                 except (ValueError, IndexError):
                     pass
+            # Canonical source boost: ensure the authoritative source for a
+            # principle ranks above secondary sources that naturally discuss it.
+            if query and _CANONICAL_BOOSTS:
+                src_name = item.get("source_name", "")
+                for kws, src_substr, factor in _CANONICAL_BOOSTS:
+                    if src_substr in src_name and all(kw in query for kw in kws):
+                        item["weighted_score"] *= factor
+                        break
             all_items.append(item)
 
     # Exact-text dedup — keep best score per unique text

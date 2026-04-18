@@ -253,11 +253,12 @@ def _build_source_map(chunks: list[dict]) -> tuple[dict[int, int], list[dict]]:
     return chunk_to_src, source_list
 
 
-def _replace_refs(answer: str, chunk_to_src: dict[int, int]) -> str:
+def _replace_refs(answer: str) -> str:
+    # build_context() numbers by document (not chunk), so [N] already maps to
+    # the Nth source in source_list — just deduplicate repeated numbers.
     def replace(m: re.Match) -> str:
-        nums = [int(x.strip()) for x in m.group(1).split(",")]
-        src_indices = list(dict.fromkeys(chunk_to_src.get(n, n) for n in nums))
-        return "[" + ", ".join(str(i) for i in src_indices) + "]"
+        nums = list(dict.fromkeys(int(x.strip()) for x in m.group(1).split(",")))
+        return "[" + ", ".join(str(i) for i in nums) + "]"
     return re.sub(r"\[([\d ,]+)\]", replace, answer)
 
 
@@ -378,8 +379,8 @@ if question:
                 ranked_chunks = rerank(raw_results, query=question)
                 result = generate_answer(question, ranked_chunks, history=chat_history)
 
-                chunk_to_src, source_list = _build_source_map(ranked_chunks)
-                answer = _replace_refs(result["answer"], chunk_to_src)
+                _, source_list = _build_source_map(ranked_chunks)
+                answer = _replace_refs(result["answer"])
 
                 st.markdown(answer)
 
