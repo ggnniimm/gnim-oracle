@@ -181,9 +181,22 @@ def run_case(
     answer = ""
     sources = []
     if generate and ranked:
-        gen = generate_answer(case["query"], ranked)
-        answer = gen["answer"]
-        sources = gen["sources"]
+        try:
+            gen = generate_answer(case["query"], ranked)
+            answer = gen["answer"]
+            sources = gen["sources"]
+        except Exception as e:
+            return {
+                "id": case["id"],
+                "query": case["query"],
+                "passed": None,
+                "failures": [],
+                "warnings": [f"Generation failed (API error): {str(e)[:120]}"],
+                "answer_snippet": "",
+                "sources_found": [],
+                "elapsed": round(time.time() - t0, 1),
+                "full_answer": "",
+            }
     else:
         # Retrieval-only: check source names from chunks
         seen = set()
@@ -278,6 +291,17 @@ def main():
     generate = not args.no_generate
     workers = args.workers
 
+    # Pre-flight: verify Gemini API is reachable before spending time on retrieval
+    if generate:
+        try:
+            client = get_client()
+            client.models.generate_content(model="gemini-2.5-flash", contents="ping",
+                                           config={"max_output_tokens": 5})
+        except Exception as e:
+            print(f"\n{RED}✗ Gemini API unreachable: {e}{RESET}")
+            print(f"{YELLOW}  Run with --no-generate to test retrieval only, or wait for API recovery.{RESET}\n")
+            sys.exit(1)
+
     mode = "retrieval+generation" if generate else "retrieval only"
 
     if workers > 1:
@@ -328,6 +352,8 @@ def main():
         print("─" * 60)
 
         results = []
+        api_error_streak = 0
+        _API_ERROR_ABORT = 3  # abort if this many consecutive TCs fail due to API error
         for case in cases:
             note = case.get("notes", "")
             if note and note.startswith("⚠️"):
@@ -337,6 +363,16 @@ def main():
             results.append(result)
             if not (note and note.startswith("⚠️")):
                 print_result(result, verbose=args.verbose)
+
+            # Circuit breaker: abort if API is repeatedly down
+            is_api_error = result.get("passed") is None and any(
+                "API error" in w for w in result.get("warnings", [])
+            )
+            api_error_streak = api_error_streak + 1 if is_api_error else 0
+            if api_error_streak >= _API_ERROR_ABORT:
+                print(f"\n{RED}✗ Gemini API down — {_API_ERROR_ABORT} consecutive failures. Aborting.{RESET}")
+                print(f"{YELLOW}  Retry with --no-generate for retrieval-only, or wait for API recovery.{RESET}\n")
+                break
 
     if args.json_out:
         print(json.dumps(results, ensure_ascii=False, indent=2))
