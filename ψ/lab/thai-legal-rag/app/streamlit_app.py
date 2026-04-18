@@ -52,17 +52,29 @@ _CSS = """
   --font-serif: 'IBM Plex Serif', Georgia, serif;
   --font-mono:  'IBM Plex Mono', ui-monospace, monospace;
 
-  --paper:   oklch(0.985 0.004 80);
-  --paper-2: oklch(0.970 0.006 80);
-  --paper-3: oklch(0.940 0.009 78);
-  --ink:     oklch(0.18 0.020 260);
-  --ink-2:   oklch(0.38 0.018 260);
-  --ink-3:   oklch(0.58 0.014 260);
+  /* Main area — warm paper */
+  --paper:   #faf9f6;
+  --paper-2: #f3f1eb;
+  --paper-3: #e8e4da;
+  --ink:     #1c1917;
+  --ink-2:   #44403c;
+  --ink-3:   #78716c;
 
-  --accent:    oklch(0.42 0.090 260);
-  --accent-lt: oklch(0.94 0.025 260);
-  --seal:      oklch(0.50 0.110 68);
-  --seal-bg:   oklch(0.95 0.040 78);
+  /* Sidebar — dark indigo */
+  --sidebar-bg:   #1e1b2e;
+  --sidebar-2:    #2a2640;
+  --sidebar-3:    #3d3856;
+  --sidebar-ink:  #e8e5f0;
+  --sidebar-ink2: #a89fc0;
+  --sidebar-ink3: #6b6485;
+
+  /* Accent */
+  --accent:    #4338ca;
+  --accent-lt: #eef2ff;
+
+  /* Citation seal (ochre/gold) */
+  --seal:    #92400e;
+  --seal-bg: #fef3c7;
 
   --radius-sm: 6px;
   --radius-md: 10px;
@@ -78,42 +90,79 @@ body, .stApp { background: var(--paper) !important; font-family: var(--font-thai
 
 /* ── Main container ── */
 .main .block-container {
-  padding-top: 1.25rem !important;
+  padding-top: 1.5rem !important;
   padding-bottom: 5rem !important;
-  max-width: 780px !important;
+  max-width: 760px !important;
 }
 
-/* ── Sidebar ── */
+/* ── Sidebar — dark indigo ── */
 section[data-testid="stSidebar"] {
-  background: var(--paper-2) !important;
-  border-right: 1px solid var(--paper-3) !important;
+  background: var(--sidebar-bg) !important;
+  border-right: none !important;
 }
-section[data-testid="stSidebar"] > div { background: transparent !important; }
+section[data-testid="stSidebar"] > div {
+  background: transparent !important;
+  height: 100vh !important;
+  overflow: hidden !important;
+}
+section[data-testid="stSidebar"] * { color: var(--sidebar-ink) !important; }
 section[data-testid="stSidebar"] ::-webkit-scrollbar { width: 3px; }
-section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb { background: var(--paper-3); border-radius: 2px; }
+section[data-testid="stSidebar"] ::-webkit-scrollbar-thumb { background: var(--sidebar-3); border-radius: 2px; }
+
+/* Make stVerticalBlock a flex column so we can push profile to bottom */
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+}
+/* Push the profile-card wrapper to the very bottom */
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:has(.profile-card) {
+  margin-top: auto !important;
+  border-top: 1px solid var(--sidebar-3) !important;
+  padding-top: 8px !important;
+  background: var(--sidebar-bg) !important;
+}
+section[data-testid="stSidebar"] [data-testid="stVerticalBlock"] > div:has(.profile-card) + div {
+  /* gear icon column wrapper also stays at bottom */
+  background: var(--sidebar-bg) !important;
+}
 
 /* Sidebar buttons */
-section[data-testid="stSidebar"] button { font-family: var(--font-thai) !important; border-radius: var(--radius-md) !important; }
-section[data-testid="stSidebar"] button[kind="primary"] { background: var(--accent) !important; border-color: var(--accent) !important; }
+section[data-testid="stSidebar"] button {
+  font-family: var(--font-thai) !important;
+  border-radius: var(--radius-md) !important;
+  background: transparent !important;
+  border: 1px solid var(--sidebar-3) !important;
+  color: var(--sidebar-ink) !important;
+}
+section[data-testid="stSidebar"] button:hover { background: var(--sidebar-2) !important; }
+section[data-testid="stSidebar"] button[kind="primary"] {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+  color: white !important;
+}
+section[data-testid="stSidebar"] hr { border-color: var(--sidebar-3) !important; }
 
-/* ── Brand mark (sidebar top) ── */
-.brand-row { display: flex; align-items: center; gap: 10px; padding: 4px 0 12px; }
+/* ── Brand mark ── */
+.brand-row { display: flex; align-items: center; gap: 10px; padding: 4px 0 14px; }
 .brand-glyph {
-  width: 38px; height: 38px;
+  width: 36px; height: 36px;
   background: var(--accent); color: white;
-  border-radius: 9px;
+  border-radius: 8px;
   display: flex; align-items: center; justify-content: center;
-  font-family: var(--font-serif); font-size: 22px; font-weight: 600;
+  font-family: var(--font-serif); font-size: 20px; font-weight: 600;
   flex-shrink: 0;
 }
-.brand-text { line-height: 1.2; }
-.brand-name { font-size: 14px; font-weight: 600; color: var(--ink); }
-.brand-sub  { font-size: 10px; color: var(--ink-3); }
+.brand-text { line-height: 1.25; }
+.brand-name { font-size: 13px; font-weight: 600; color: var(--sidebar-ink) !important; }
+.brand-sub  { font-size: 10px; color: var(--sidebar-ink2) !important; }
 
 /* ── History group label ── */
 .hist-group {
-  font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase; color: var(--ink-3);
+  font-size: 9px; font-weight: 600; letter-spacing: 0.09em;
+  text-transform: uppercase; color: var(--sidebar-ink3) !important;
   padding: 10px 0 3px; margin: 0;
 }
 
@@ -252,6 +301,32 @@ hr { border-color: var(--paper-3) !important; margin: 0.5rem 0 !important; }
 /* ── Auth tabs ── */
 .stTabs [data-baseweb="tab-list"] { background: var(--paper-2) !important; }
 .stTabs [data-baseweb="tab"] { font-family: var(--font-thai) !important; }
+
+/* ── Profile card ── */
+.profile-card {
+  display: flex; align-items: center; gap: 10px;
+  padding: 4px 0;
+}
+.profile-avatar {
+  width: 34px; height: 34px; flex-shrink: 0;
+  background: var(--sidebar-3);
+  color: var(--sidebar-ink);
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13px; font-weight: 600;
+  font-family: var(--font-thai);
+}
+.profile-info { overflow: hidden; line-height: 1.3; }
+.profile-name {
+  font-size: 13px; font-weight: 600;
+  color: var(--sidebar-ink) !important;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.profile-pos {
+  font-size: 10.5px;
+  color: var(--sidebar-ink2) !important;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 </style>
 """
 
@@ -645,20 +720,53 @@ with st.sidebar:
                 _save_chats(st.session_state.chats)
                 st.rerun()
 
-    st.divider()
-    with st.popover(f"👤 {st.session_state.get('name', _USERNAME)}", use_container_width=True):
-        st.caption(f"@{_USERNAME}")
-        st.divider()
-        authenticator.logout(button_name="ออกจากระบบ", location="main")
-        st.divider()
-        st.markdown("**🔑 เปลี่ยนรหัสผ่าน**")
-        try:
-            if authenticator.reset_password(_USERNAME, key="sidebar_reset"):
+    # ── Profile card (pushed to bottom via CSS flex) ──────────────────────────
+
+    # Read position from auth_config (may be empty)
+    _user_creds = _auth_config["credentials"]["usernames"].get(_USERNAME, {})
+    _display_name = st.session_state.get("name", _USERNAME)
+    _position     = _user_creds.get("position", "")
+
+    # Avatar: first char of each space-separated word (max 2)
+    def _initials(name: str) -> str:
+        parts = name.split()
+        return "".join(p[0] for p in parts[:2]).upper() if parts else "?"
+
+    _avatar = _initials(_display_name)
+
+    _profile_html = f"""
+<div class="profile-card">
+  <div class="profile-avatar">{_avatar}</div>
+  <div class="profile-info">
+    <div class="profile-name">{_html.escape(_display_name)}</div>
+    <div class="profile-pos">{_html.escape(_position) if _position else "&nbsp;"}</div>
+  </div>
+</div>
+"""
+    col_card, col_gear = st.columns([6, 1])
+    with col_card:
+        st.markdown(_profile_html, unsafe_allow_html=True)
+    with col_gear:
+        with st.popover("⚙", use_container_width=True):
+            st.markdown("**ตำแหน่ง / หน่วยงาน**")
+            new_pos = st.text_input("ตำแหน่ง", value=_position, placeholder="เช่น นักวิชาการพัสดุ - กปน.", key="edit_position")
+            if st.button("บันทึก", key="save_position"):
+                _auth_config["credentials"]["usernames"][_USERNAME]["position"] = new_pos
                 with open(_AUTH_CONFIG_PATH, "w") as f:
                     yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
-                st.success("เปลี่ยนรหัสผ่านสำเร็จ")
-        except Exception as e:
-            st.error(str(e))
+                st.success("บันทึกแล้ว")
+                st.rerun()
+            st.divider()
+            st.markdown("**🔑 เปลี่ยนรหัสผ่าน**")
+            try:
+                if authenticator.reset_password(_USERNAME, key="sidebar_reset"):
+                    with open(_AUTH_CONFIG_PATH, "w") as f:
+                        yaml.dump(_auth_config, f, allow_unicode=True, default_flow_style=False)
+                    st.success("เปลี่ยนรหัสผ่านสำเร็จ")
+            except Exception as e:
+                st.error(str(e))
+            st.divider()
+            authenticator.logout(button_name="ออกจากระบบ", location="main")
 
 # ── Main chat area ────────────────────────────────────────────────────────────
 
