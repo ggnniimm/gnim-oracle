@@ -285,6 +285,10 @@ def main():
     p.add_argument("--verbose", "-v", action="store_true", help="Show answer snippet on failure")
     p.add_argument("--workers", "-w", type=int, default=1,
                    help="Parallel workers (default 1; use 3 for safe parallelism with 1 API key)")
+    p.add_argument("--tc-timeout", type=int, default=120,
+                   help="Per-TC timeout in seconds (default 120). TC aborted and marked as API error if exceeded.")
+    p.add_argument("--sleep", type=float, default=2.0,
+                   help="Sleep between TCs in seconds to pace Gemini API (default 2.0; use 0 to disable)")
     args = p.parse_args()
 
     cases = load_cases(filter_id=args.id)
@@ -354,12 +358,30 @@ def main():
         results = []
         api_error_streak = 0
         _API_ERROR_ABORT = 3  # abort if this many consecutive TCs fail due to API error
-        for case in cases:
+        tc_timeout = args.tc_timeout
+        sleep_between = args.sleep if generate else 0.0
+        for i, case in enumerate(cases):
             note = case.get("notes", "")
             if note and note.startswith("⚠️"):
                 print(f"\n{YELLOW}[{case['id']}] Skipping — {note[:60]}{RESET}")
 
-            result = run_case(case, retriever, generate)
+            # Per-TC timeout via thread — shutdown(wait=False) so main loop isn't blocked
+            from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
+            _pool = ThreadPoolExecutor(max_workers=1)
+            _future = _pool.submit(run_case, case, retriever, generate)
+            try:
+                result = _future.result(timeout=tc_timeout)
+            except FuturesTimeout:
+                _future.cancel()
+                result = {
+                    "id": case["id"], "query": case["query"],
+                    "passed": None, "failures": [],
+                    "warnings": [f"TC timed out after {tc_timeout}s (API error)"],
+                    "answer_snippet": "", "sources_found": [], "elapsed": tc_timeout,
+                }
+            finally:
+                _pool.shutdown(wait=False)
+
             results.append(result)
             if not (note and note.startswith("⚠️")):
                 print_result(result, verbose=args.verbose)
@@ -373,6 +395,10 @@ def main():
                 print(f"\n{RED}✗ Gemini API down — {_API_ERROR_ABORT} consecutive failures. Aborting.{RESET}")
                 print(f"{YELLOW}  Retry with --no-generate for retrieval-only, or wait for API recovery.{RESET}\n")
                 break
+
+            # Pace Gemini API calls between TCs
+            if sleep_between > 0 and i < len(cases) - 1:
+                time.sleep(sleep_between)
 
     if args.json_out:
         print(json.dumps(results, ensure_ascii=False, indent=2))

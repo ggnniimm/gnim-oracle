@@ -17,12 +17,16 @@ _KEY_INDEX = 0
 DEFAULT_TIMEOUT_MS = 120_000  # 120 seconds
 
 # Retry config for transient 503/429 errors
-_MAX_RETRIES = 4
-_RETRY_BASE_DELAY = 1  # seconds — exponential: 1, 2, 4, 8 + jitter
+_MAX_RETRIES = 3
+_RETRY_BASE_DELAY = 2  # seconds — exponential: 2, 4, 8 + jitter
+_FINAL_ROUND_COOLDOWN = 20  # seconds — wait after full chain fails once before last-chance round
 
-# Fallback models when primary is overloaded
+# Fallback models when primary is overloaded.
+# Different aliases often route to different backend capacity pools,
+# so cycling through them gives a better shot at finding a healthy one.
 _FALLBACK_MODELS = [
     "gemini-2.5-flash-lite",
+    "gemini-flash-latest",
 ]
 
 
@@ -43,14 +47,33 @@ def get_client() -> genai.Client:
     )
 
 
+_TRANSIENT_MARKERS = (
+    "503", "429", "500", "unavailable", "overloaded",
+    "resource_exhausted", "timeout", "timed out", "stream idle",
+    "deadline exceeded",
+)
+
+
+def _is_transient(exc: Exception) -> bool:
+    return any(k in str(exc).lower() for k in _TRANSIENT_MARKERS)
+
+
 def generate_with_retry(client: genai.Client, **kwargs):
     """Call client.models.generate_content with exponential backoff + jitter.
-    Falls back to lighter models if primary is persistently overloaded.
+
+    Strategy:
+      1. Try primary model up to _MAX_RETRIES with exp backoff.
+      2. If still failing, cycle through fallback models (one attempt each).
+      3. If the full chain fails, cooldown _FINAL_ROUND_COOLDOWN seconds and
+         do one last round across all models. Google infra 503s typically
+         recover within 30-60s.
+      4. Non-transient errors (auth, invalid request) raise immediately.
     """
     primary_model = kwargs.get("model", "gemini-2.5-flash")
-    models_to_try = [primary_model] + _FALLBACK_MODELS
+    models_to_try = [primary_model] + [m for m in _FALLBACK_MODELS if m != primary_model]
     last_exc = None
 
+    # Round 1: try each model with its own retry budget
     for model in models_to_try:
         if model != primary_model:
             logger.warning(f"Primary model {primary_model} unavailable, falling back to {model}")
@@ -59,15 +82,29 @@ def generate_with_retry(client: genai.Client, **kwargs):
             try:
                 return client.models.generate_content(**kwargs)
             except Exception as e:
-                err_str = str(e)
-                err_lower = err_str.lower()
-                if any(k in err_lower for k in ("503", "429", "unavailable", "resource_exhausted", "timeout", "timed out", "stream idle")):
-                    last_exc = e
-                    if attempt + 1 < _MAX_RETRIES:
-                        delay = _RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1)
-                        logger.warning(f"Gemini {model} attempt {attempt+1}/{_MAX_RETRIES}, retry in {delay:.1f}s")
-                        time.sleep(delay)
-                        client = get_client()
-                else:
+                if not _is_transient(e):
                     raise
+                last_exc = e
+                if attempt + 1 < _MAX_RETRIES:
+                    delay = _RETRY_BASE_DELAY * (2 ** attempt) + random.uniform(0, 1.5)
+                    logger.warning(f"Gemini {model} attempt {attempt+1}/{_MAX_RETRIES}, retry in {delay:.1f}s")
+                    time.sleep(delay)
+                    client = get_client()
+
+    # Round 2: full-chain cooldown + one last try per model
+    logger.warning(
+        f"All models failed round 1. Cooling down {_FINAL_ROUND_COOLDOWN}s before final attempt."
+    )
+    time.sleep(_FINAL_ROUND_COOLDOWN + random.uniform(0, 5))
+    for model in models_to_try:
+        kwargs["model"] = model
+        try:
+            client = get_client()
+            return client.models.generate_content(**kwargs)
+        except Exception as e:
+            if not _is_transient(e):
+                raise
+            last_exc = e
+            logger.warning(f"Gemini {model} final attempt failed: {str(e)[:100]}")
+
     raise last_exc
