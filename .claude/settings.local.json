@@ -220,7 +220,20 @@
       "Bash(ORACLE_REPO_ROOT=/Users/mingsaksaengwilaipon/gnim-oracle-qdrant bun /tmp/test_vector_search.ts)",
       "Bash(mkdir -p \"ψ/memory/retrospectives/2026-04/15\")",
       "Bash(mkdir -p \"ψ/memory/learnings\")",
-      "Bash(awk '{print $1}')"
+      "Bash(awk '{print $1}')",
+      "Bash(scp \"data/md_backup/๑๘.md\" root@31.97.188.155:/app/thai-legal-rag/data/md_backup/)",
+      "Bash(scp \"data/md_backup/กวจ_61864_141263_ข้อหารือแนวทางปฏิบัติในการจัดจ้าง_ผู้มีอำนาจงดหรือลดค่าปรับ.md\" root@31.97.188.155:/app/thai-legal-rag/data/md_backup/)",
+      "Bash(scp eval/golden_test_cases.json root@31.97.188.155:/app/thai-legal-rag/eval/)",
+      "Bash(tee /tmp/tc008_prod_result.txt)",
+      "Bash(xargs -I{} grep -l \"51385\\\\|1758\\\\|26141\\\\|27093\" {})",
+      "Bash(scp \"กวจ_0405.4_22315_ประเด็น6_แก้ไขสัญญาเนื้องาน.md\" root@31.97.188.155:/app/thai-legal-rag/data/md_backup/)",
+      "Bash(scp \"คำวินิจฉัยที่_๑๔๒_๒๕๖๔.md\" root@31.97.188.155:/app/thai-legal-rag/data/md_backup/)",
+      "Bash(scp \"data/md_backup/01_กวจ_51385_191268_ข้อหารือเกี่ยวกับการบริหารพัสดุตามพระราชบัญญัติการจัดซื้อจัดจ้างฯ+PDPA-2.md\" root@31.97.188.155:\"/app/thai-legal-rag/data/md_backup/01_กวจ_51385_191268_ข้อหารือเกี่ยวกับการบริหารพัสดุตามพระราชบัญญัติการจัดซื้อจัดจ้างฯ+PDPA-2.md\")",
+      "Bash(awk '{print $2, $11}')",
+      "Bash(awk '{print $1, $2, $11}')",
+      "Bash(cp /Users/mingsaksaengwilaipon/gnim-oracle-embedding-v2/ψ/memory/learnings/2026-03-14_eval-criteria-must-mirror-question-intent.md /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/learnings/2026-03-14_eval-criteria-must-mirror-question-intent.md)",
+      "Bash(mkdir -p /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/retrospectives/2026-03/14)",
+      "Bash(cp /Users/mingsaksaengwilaipon/gnim-oracle-embedding-v2/ψ/memory/retrospectives/2026-03/14/21.29_eval-stabilization-61-61.md /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/retrospectives/2026-03/14/21.29_eval-stabilization-61-61.md)"
     ]
   }
 }
