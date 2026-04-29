@@ -233,7 +233,16 @@
       "Bash(awk '{print $1, $2, $11}')",
       "Bash(cp /Users/mingsaksaengwilaipon/gnim-oracle-embedding-v2/ψ/memory/learnings/2026-03-14_eval-criteria-must-mirror-question-intent.md /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/learnings/2026-03-14_eval-criteria-must-mirror-question-intent.md)",
       "Bash(mkdir -p /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/retrospectives/2026-03/14)",
-      "Bash(cp /Users/mingsaksaengwilaipon/gnim-oracle-embedding-v2/ψ/memory/retrospectives/2026-03/14/21.29_eval-stabilization-61-61.md /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/retrospectives/2026-03/14/21.29_eval-stabilization-61-61.md)"
+      "Bash(cp /Users/mingsaksaengwilaipon/gnim-oracle-embedding-v2/ψ/memory/retrospectives/2026-03/14/21.29_eval-stabilization-61-61.md /Users/mingsaksaengwilaipon/gnim-oracle-qdrant/ψ/memory/retrospectives/2026-03/14/21.29_eval-stabilization-61-61.md)",
+      "Bash(QDRANT_URL=http://localhost:6333 python3 -u eval/run_eval.py --id TC-027 -v)",
+      "Bash(QDRANT_URL=http://localhost:6333 GEMINI_API_KEY=AIzaSyCE5Tipybpy7VIN7C9HHMU1jy2W-wrvvKU python3 -u eval/run_eval.py --id TC-027 -v)",
+      "Bash(ROOT=/Users/mingsaksaengwilaipon/gnim-oracle cd /Users/mingsaksaengwilaipon/.claude/skills/watch)",
+      "Bash(ROOT=/Users/mingsaksaengwilaipon/gnim-oracle bun scripts/save-learning.ts --help)",
+      "mcp__arra-oracle-v2__arra_supersede",
+      "Bash(ps -p 82286 -o pid,state,etime,cpu)",
+      "Bash(awk '{print $2, $10, $11}')",
+      "Bash(QDRANT_URL=http://localhost:6333 python3 *)",
+      "Bash(scp *)"
     ]
   }
 }
