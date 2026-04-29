@@ -4,6 +4,11 @@
 **Session**: 9de6b5ad | gnim-oracle
 📡 Session: 9de6b5ad | gnim-oracle
 
+> **STATUS RESOLVED — 2026-04-29 ~13:30 BKK** (session 5bbf3b3a):
+> Deploy completed. Prod: 1,228 MD files synced, 27,713 Qdrant points (dim 3072 / gemini-embedding-2-preview), mwaprocure HTTP 200, retrieval verified (430 vector + 205 BM25 candidates on test query). 5 files excluded for ext4 NAME_MAX (filenames >255 bytes UTF-8) — see `project_drive_id_remapping.md` for the rename follow-up. Backups preserved on prod: `dedup.db.bak.2026-04-29`, `bm25.pkl.bak.2026-04-29`, `.env.bak.2026-04-29`, plus Qdrant snapshot `thai_legal_rag-...2026-04-29-03-05-59.snapshot`. Local `/tmp/prod_md_backup_2026-04-29/` also kept. New learning: `ψ/memory/learnings/2026-04-29_drive-remap-deploy-gotchas.md`.
+>
+> Per Nothing is Deleted, the original handoff is preserved below.
+
 ## Status
 
 The Drive ID remapping work was finished locally on 2026-04-08 (1,113 file_ids verified HTTP 200). The "remaining: deploy to production" item in MEMORY turned out to be more involved than the wording implied — local and prod have diverged by 215 files and need a Qdrant re-index, not just a payload patch.

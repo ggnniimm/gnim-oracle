@@ -15,6 +15,7 @@ __pycache__/
 
 # Claude harness cache (local session state)
 .claude/projects/
+.claude/scheduled_tasks.lock
 
 # Large data archives (indexes, dedup DBs — ~1.8 GB)
 ψ/archive/
