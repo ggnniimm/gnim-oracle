@@ -1,4 +1,5 @@
 .env
+.env.bak.*
 ψ/learn/**/origin
 credentials.json
 token.json
