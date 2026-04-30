@@ -542,11 +542,17 @@
       "บอกเลิกสัญญา",
       [
         "มาตรา 103",
-        "มาตรา ๑๐๓"
+        "มาตรา ๑๐๓",
+        "ประมวลกฎหมายแพ่งและพาณิชย์ มาตรา 391",
+        "ประมวลกฎหมายแพ่งและพาณิชย์ มาตรา ๓๙๑",
+        "ประมวลกฎหมายแพ่งและพาณิชย์ มาตรา 222",
+        "ประมวลกฎหมายแพ่งและพาณิชย์ มาตรา ๒๒๒",
+        "ข้อ 183",
+        "ข้อ ๑๘๓"
       ]
     ],
     "must_not_contain": [],
-    "notes": "หมวดบอกเลิกสัญญา — เรียกค่าเสียหายตามมาตรา 103 ประกอบข้อ 183 ระเบียบฯ — source: 7783 (ข้อหารือการพิจารณาเรียกค่าเสียหายภายหลังบอกเลิกสัญญา)"
+    "notes": "หมวดบอกเลิกสัญญา — เรียกค่าเสียหายตามมาตรา 103 ประกอบข้อ 183 ระเบียบฯ — source: 7783. must_contain accepts EITHER พ.ร.บ. ม.103 (framing-section anchor) OR any civil-code/regulation operative anchor: ป.พ.พ. ม.391 (restoration-after-termination), ป.พ.พ. ม.222 (debtor's-default damages), or ระเบียบ ข้อ 183 (same termination scenario per source's laws_referenced). Stabilizes against LLM scope-narrowing variance. Updated 2026-04-30 — see ψ/memory/learnings/2026-04-30_eval-tc035-civil-code-alternative.md"
   },
   {
     "id": "TC-036",
