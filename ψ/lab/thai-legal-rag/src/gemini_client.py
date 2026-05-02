@@ -7,7 +7,12 @@ import random
 import logging
 from google import genai
 
-from src.config import GEMINI_API_KEYS
+from src.config import (
+    GEMINI_API_KEYS,
+    GOOGLE_CLOUD_PROJECT,
+    GOOGLE_CLOUD_LOCATION,
+    USE_VERTEX_AI,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +46,13 @@ def _next_key() -> str:
 
 def get_client() -> genai.Client:
     """Return a Gemini client with default timeout baked in."""
+    if USE_VERTEX_AI:
+        return genai.Client(
+            vertexai=True,
+            project=GOOGLE_CLOUD_PROJECT,
+            location=GOOGLE_CLOUD_LOCATION,
+            http_options={"timeout": DEFAULT_TIMEOUT_MS},
+        )
     return genai.Client(
         api_key=_next_key(),
         http_options={"timeout": DEFAULT_TIMEOUT_MS},

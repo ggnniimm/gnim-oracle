@@ -15,6 +15,11 @@ GEMINI_API_KEYS: list[str] = [
     if k.strip()
 ]
 
+# Vertex AI mode (uses ADC instead of API keys, billed through GCP project)
+GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
+GOOGLE_CLOUD_LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1").strip()
+USE_VERTEX_AI = bool(GOOGLE_CLOUD_PROJECT)
+
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 # OAuth2 paths (set via env or use defaults)
 # GOOGLE_CREDENTIALS_JSON and GOOGLE_TOKEN_JSON are read directly in drive.py
@@ -45,7 +50,7 @@ for _d in [BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
 
 # --- Models ---
 GEMINI_FLASH_MODEL = "gemini-2.5-flash"
-GEMINI_EMBEDDING_MODEL = "models/gemini-embedding-2-preview"
+GEMINI_EMBEDDING_MODEL = "gemini-embedding-2-preview"
 EMBEDDING_DIM = 3072  # gemini-embedding-2-preview default output dim
 
 # --- Chunking ---

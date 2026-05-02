@@ -25,9 +25,14 @@ logger = logging.getLogger(__name__)
 _COLLECTION = "thai_legal_rag"
 
 
-def _embed(texts: list[str], _retries: int = 3) -> np.ndarray:
-    """Embed a list of texts using Gemini embedding model (with retry)."""
+def _embed(texts: list[str], _retries: int = 8) -> np.ndarray:
+    """Embed a list of texts using Gemini embedding model.
+
+    Aggressive backoff: 429 quota hits get 60-180s waits (Vertex preview models
+    have low default RPM). Non-quota errors fall back to short exp backoff.
+    """
     import time
+    import random
     for attempt in range(1, _retries + 1):
         try:
             client = get_client()
@@ -39,8 +44,17 @@ def _embed(texts: list[str], _retries: int = 3) -> np.ndarray:
         except Exception as e:
             if attempt == _retries:
                 raise
-            logger.warning(f"Embed attempt {attempt} failed: {e}, retrying in {attempt * 2}s...")
-            time.sleep(attempt * 2)
+            err = str(e).lower()
+            is_quota = "429" in err or "resource_exhausted" in err or "quota" in err
+            if is_quota:
+                wait = 60 + (attempt - 1) * 30 + random.uniform(0, 15)
+            else:
+                wait = attempt * 2 + random.uniform(0, 1)
+            logger.warning(
+                f"Embed attempt {attempt}/{_retries} failed (quota={is_quota}): "
+                f"{str(e)[:120]}, retrying in {wait:.1f}s..."
+            )
+            time.sleep(wait)
     vectors = np.array([e.values for e in result.embeddings], dtype=np.float32)
     if vectors.ndim == 1:
         vectors = vectors.reshape(1, -1)

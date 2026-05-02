@@ -3,6 +3,8 @@
 ψ/learn/**/origin
 credentials.json
 token.json
+gen-lang-client-*.json
+*-service-account*.json
 
 # Python
 __pycache__/
