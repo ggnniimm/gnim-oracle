@@ -28,37 +28,41 @@ _COLLECTION = "thai_legal_rag"
 def _embed(texts: list[str], _retries: int = 8) -> np.ndarray:
     """Embed a list of texts using Gemini embedding model.
 
-    Aggressive backoff: 429 quota hits get 60-180s waits (Vertex preview models
-    have low default RPM). Non-quota errors fall back to short exp backoff.
+    Vertex AI mode: embed_content returns only 1 embedding regardless of input
+    count — batch API not supported. We embed one text at a time.
+    Aggressive backoff: 429 quota hits get 60-180s waits (Vertex preview ~3 RPM).
     """
     import time
     import random
-    for attempt in range(1, _retries + 1):
-        try:
-            client = get_client()
-            result = client.models.embed_content(
-                model=GEMINI_EMBEDDING_MODEL,
-                contents=texts,
-            )
-            break
-        except Exception as e:
-            if attempt == _retries:
-                raise
-            err = str(e).lower()
-            is_quota = "429" in err or "resource_exhausted" in err or "quota" in err
-            if is_quota:
-                wait = 60 + (attempt - 1) * 30 + random.uniform(0, 15)
-            else:
-                wait = attempt * 2 + random.uniform(0, 1)
-            logger.warning(
-                f"Embed attempt {attempt}/{_retries} failed (quota={is_quota}): "
-                f"{str(e)[:120]}, retrying in {wait:.1f}s..."
-            )
-            time.sleep(wait)
-    vectors = np.array([e.values for e in result.embeddings], dtype=np.float32)
+
+    def _embed_one(text: str) -> list[float]:
+        for attempt in range(1, _retries + 1):
+            try:
+                client = get_client()
+                result = client.models.embed_content(
+                    model=GEMINI_EMBEDDING_MODEL,
+                    contents=text,
+                )
+                return result.embeddings[0].values
+            except Exception as e:
+                if attempt == _retries:
+                    raise
+                err = str(e).lower()
+                is_quota = "429" in err or "resource_exhausted" in err or "quota" in err
+                if is_quota:
+                    wait = 60 + (attempt - 1) * 30 + random.uniform(0, 15)
+                else:
+                    wait = attempt * 2 + random.uniform(0, 1)
+                logger.warning(
+                    f"Embed attempt {attempt}/{_retries} failed (quota={is_quota}): "
+                    f"{str(e)[:120]}, retrying in {wait:.1f}s..."
+                )
+                time.sleep(wait)
+
+    all_values = [_embed_one(t) for t in texts]
+    vectors = np.array(all_values, dtype=np.float32)
     if vectors.ndim == 1:
         vectors = vectors.reshape(1, -1)
-    # Normalize for cosine similarity (Qdrant cosine does this too, but keep consistent)
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     norms = np.where(norms == 0, 1, norms)
     return vectors / norms
