@@ -5,6 +5,7 @@ credentials.json
 token.json
 gen-lang-client-*.json
 *-service-account*.json
+ψ/lab/thai-legal-rag/credentials/*.json
 
 # Python
 __pycache__/
@@ -24,6 +25,7 @@ __pycache__/
 
 # Auth secrets
 ψ/lab/thai-legal-rag/app/auth_config.yaml
+ψ/lab/thai-legal-rag/test-env-aistudio.sh
 
 # Next.js UI build artifacts
 ψ/lab/thai-legal-rag/ui/node_modules/

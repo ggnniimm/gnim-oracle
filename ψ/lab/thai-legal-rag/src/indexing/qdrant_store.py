@@ -15,51 +15,77 @@ from src.config import (
     EMBEDDING_DIM,
     VECTOR_TOP_K,
     GEMINI_EMBEDDING_MODEL,
+    OPENAI_API_KEY,
+    QDRANT_COLLECTION,
     QDRANT_PATH,
     QDRANT_URL,
 )
 from src.gemini_client import get_client
 
+_USE_OPENAI = bool(OPENAI_API_KEY) and GEMINI_EMBEDDING_MODEL.startswith("text-embedding-")
+
 logger = logging.getLogger(__name__)
 
-_COLLECTION = "thai_legal_rag"
+_COLLECTION = QDRANT_COLLECTION
 
 
 def _embed(texts: list[str], _retries: int = 8) -> np.ndarray:
-    """Embed a list of texts using Gemini embedding model.
-
-    Vertex AI mode: embed_content returns only 1 embedding regardless of input
-    count — batch API not supported. We embed one text at a time.
-    Aggressive backoff: 429 quota hits get 60-180s waits (Vertex preview ~3 RPM).
-    """
+    """Embed texts using configured provider (OpenAI or Gemini/Vertex AI)."""
     import time
     import random
 
-    def _embed_one(text: str) -> list[float]:
-        for attempt in range(1, _retries + 1):
-            try:
-                client = get_client()
-                result = client.models.embed_content(
-                    model=GEMINI_EMBEDDING_MODEL,
-                    contents=text,
-                )
-                return result.embeddings[0].values
-            except Exception as e:
-                if attempt == _retries:
-                    raise
-                err = str(e).lower()
-                is_quota = "429" in err or "resource_exhausted" in err or "quota" in err
-                if is_quota:
-                    wait = 60 + (attempt - 1) * 30 + random.uniform(0, 15)
-                else:
-                    wait = attempt * 2 + random.uniform(0, 1)
-                logger.warning(
-                    f"Embed attempt {attempt}/{_retries} failed (quota={is_quota}): "
-                    f"{str(e)[:120]}, retrying in {wait:.1f}s..."
-                )
-                time.sleep(wait)
+    if _USE_OPENAI:
+        from openai import OpenAI
+        _client = OpenAI(api_key=OPENAI_API_KEY)
 
-    all_values = [_embed_one(t) for t in texts]
+        def _embed_batch_openai(batch: list[str]) -> list[list[float]]:
+            for attempt in range(1, _retries + 1):
+                try:
+                    result = _client.embeddings.create(
+                        model=GEMINI_EMBEDDING_MODEL,
+                        input=batch,
+                    )
+                    return [item.embedding for item in result.data]
+                except Exception as e:
+                    if attempt == _retries:
+                        raise
+                    err = str(e).lower()
+                    is_quota = "429" in err or "rate_limit" in err or "quota" in err
+                    wait = 10 + attempt * 5 + random.uniform(0, 3) if is_quota else attempt * 2
+                    logger.warning(
+                        f"OpenAI embed attempt {attempt}/{_retries} failed: "
+                        f"{str(e)[:120]}, retrying in {wait:.1f}s..."
+                    )
+                    time.sleep(wait)
+
+        # OpenAI supports up to 2048 texts per call — use 100 to stay safe
+        all_values = []
+        for i in range(0, len(texts), 100):
+            all_values.extend(_embed_batch_openai(texts[i:i + 100]))
+    else:
+        def _embed_one(text: str) -> list[float]:
+            for attempt in range(1, _retries + 1):
+                try:
+                    client = get_client()
+                    result = client.models.embed_content(
+                        model=GEMINI_EMBEDDING_MODEL,
+                        contents=text,
+                    )
+                    return result.embeddings[0].values
+                except Exception as e:
+                    if attempt == _retries:
+                        raise
+                    err = str(e).lower()
+                    is_quota = "429" in err or "resource_exhausted" in err or "quota" in err
+                    wait = 60 + (attempt - 1) * 30 + random.uniform(0, 15) if is_quota \
+                        else attempt * 2 + random.uniform(0, 1)
+                    logger.warning(
+                        f"Embed attempt {attempt}/{_retries} failed (quota={is_quota}): "
+                        f"{str(e)[:120]}, retrying in {wait:.1f}s..."
+                    )
+                    time.sleep(wait)
+
+        all_values = [_embed_one(t) for t in texts]
     vectors = np.array(all_values, dtype=np.float32)
     if vectors.ndim == 1:
         vectors = vectors.reshape(1, -1)

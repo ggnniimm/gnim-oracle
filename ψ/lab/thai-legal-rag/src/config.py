@@ -14,6 +14,7 @@ GEMINI_API_KEYS: list[str] = [
     for k in os.getenv("GEMINI_API_KEYS", os.getenv("GEMINI_API_KEY", "")).split(",")
     if k.strip()
 ]
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
 # Vertex AI mode (uses ADC instead of API keys, billed through GCP project)
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
@@ -50,8 +51,9 @@ for _d in [BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
 
 # --- Models ---
 GEMINI_FLASH_MODEL = "gemini-2.5-flash"
-GEMINI_EMBEDDING_MODEL = "gemini-embedding-2-preview"
-EMBEDDING_DIM = 3072  # gemini-embedding-2-preview default output dim
+GEMINI_EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2-preview")
+EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "thai_legal_rag")
 
 # --- Chunking ---
 CHUNK_SIZE = 400       # tokens / chars
