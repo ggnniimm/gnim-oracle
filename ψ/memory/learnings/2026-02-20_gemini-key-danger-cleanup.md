@@ -19,7 +19,9 @@ THAI_RAG_DATA_DIR=$(pwd)/data \
   python3 pipeline/regenerate_sections.py --cleanup
 ```
 
-หรือใช้ key โดยตรง: `GEMINI_API_KEY=AIzaSyA4i6YDcYE-wDhleL2chqbhAZGxgnRXtGM`
+หรือใช้ key โดยตรง: `GEMINI_API_KEY=REDACTED-leaked-public-repo-rotated-2026-05-08`
+<!-- Original key was leaked in public repo since 2026-02-21 — rotated and redacted 2026-05-08 -->
+
 
 ## ตรวจสอบก่อนรัน
 
