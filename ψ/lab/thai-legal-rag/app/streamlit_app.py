@@ -29,7 +29,7 @@ from src.indexing.manager import IndexManager
 from src.retrieval.retriever import Retriever
 from src.retrieval.reranker import rerank
 from src.generation.generator import generate_answer
-from src.config import GEMINI_API_KEYS
+from src.config import GEMINI_API_KEYS, USE_VERTEX_AI
 
 st.set_page_config(
     page_title="Thai Legal RAG",
@@ -270,8 +270,8 @@ def get_retriever():
     return Retriever(index)
 
 
-if not GEMINI_API_KEYS:
-    st.error("GEMINI_API_KEY not set in environment.")
+if not (GEMINI_API_KEYS or USE_VERTEX_AI):
+    st.error("No Gemini auth configured: set GEMINI_API_KEY or GOOGLE_CLOUD_PROJECT.")
     st.stop()
 
 retriever = get_retriever()
