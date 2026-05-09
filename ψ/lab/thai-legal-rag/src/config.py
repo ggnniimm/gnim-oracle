@@ -51,6 +51,11 @@ for _d in [BM25_DIR, OCR_CACHE_DIR, MD_BACKUP_DIR, FAILED_LOG_DIR]:
 
 # --- Models ---
 GEMINI_FLASH_MODEL = "gemini-2.5-flash"
+GEMINI_PRO_MODEL = "gemini-2.5-pro"
+# OCR_EXTRACT_MODEL: model used for the extract phase of OCR (verbatim doc body).
+# classify + anchor stay on Flash (cheap, sufficient). Pro for extract = better
+# table fidelity, fewer dropped sections, thinking-mode reasoning on schema.
+OCR_EXTRACT_MODEL = os.getenv("OCR_EXTRACT_MODEL", GEMINI_PRO_MODEL)
 GEMINI_EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2-preview")
 EMBEDDING_DIM = int(os.getenv("EMBEDDING_DIM", "3072"))
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "thai_legal_rag")

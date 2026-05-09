@@ -25,6 +25,7 @@ from google.genai import types as genai_types
 
 from src.config import (
     GEMINI_FLASH_MODEL,
+    OCR_EXTRACT_MODEL,
     MD_BACKUP_DIR,
     OCR_CACHE_DIR,
 )
@@ -113,17 +114,85 @@ quality_note: ""
 """,
 }
 
+# Type-specific section templates. Different doc kinds need different
+# Markdown body structure — circulars (หนังสือเวียน) don't have ประเด็นข้อหารือ,
+# court judgments don't have ข้อวินิจฉัย-of-committee, etc.
+_RULING_SECTIONS = """## ข้อเท็จจริง
+[คัดลอกข้อความในส่วนข้อเท็จจริงออกมาทั้งหมด verbatim]
+
+## ประเด็นข้อหารือ
+[คัดลอกประเด็นคำถามที่หน่วยงานขอหารือออกมาทั้งหมด verbatim ทุกข้อ เช่น ๑. ... ๒. ... ๓. ...
+ห้ามสรุปหรืออ้างอิงว่า "ตามที่กล่าวข้างต้น" ต้องคัดลอกข้อความจริงออกมาทั้งหมด]
+
+## ข้อวินิจฉัย
+[คัดลอกข้อวินิจฉัยของคณะกรรมการออกมาทั้งหมด verbatim ทุกข้อ]
+
+## สรุปข้อวินิจฉัย
+[สรุปเป็น bullet points ครบทุกประเด็นที่วินิจฉัย ไม่จำกัดจำนวน — ต้องมีทุกข้อหารือที่ปรากฏ]"""
+
+_CIRCULAR_SECTIONS = """## หลักการและที่มา
+[คัดลอก verbatim — ที่มา หลักการ อำนาจตามมาตรา/ข้อที่อ้างอิงในการออกหนังสือเวียน
+รวมถึงระเบียบ/พ.ร.บ. ที่ถูกยกเว้นหรือผ่อนผัน ถ้ามี]
+
+## แนวปฏิบัติ
+[คัดลอกเนื้อหาแนวทางปฏิบัติทั้งหมด verbatim ทุกข้อ — รักษาเลขข้อเดิม (๑. ๒. ๓.๑ ๓.๒ ฯลฯ)
+รวมตัวอย่างข้อความที่ให้แก้ไขในแบบประกาศ ถ้ามี]
+
+## การใช้บังคับ
+[คัดลอก verbatim — วันที่มีผลบังคับใช้ เงื่อนไขใช้กับกรณีใด การจัดซื้อจัดจ้างก่อน-หลังวันบังคับใช้
+ถ้าไม่ระบุชัดเจน ใส่ "ไม่ระบุในเอกสาร"]
+
+## ข้อสังเกต
+[คัดลอก verbatim ถ้ามีหมายเหตุ ข้อยกเว้น หรือข้อสังเกตเพิ่มเติม
+ถ้าไม่มี ใส่ "ไม่มี"]"""
+
+_COURT_SECTIONS = """## ข้อเท็จจริง
+[คัดลอกข้อเท็จจริงของคดี verbatim]
+
+## ประเด็นวินิจฉัย
+[คัดลอกประเด็นที่ศาลพิจารณา verbatim]
+
+## คำวินิจฉัย
+[คัดลอกคำวินิจฉัยของศาล verbatim ทุกประเด็น]
+
+## สรุปคำวินิจฉัย
+[สรุปเป็น bullet points ครบทุกประเด็น พร้อมหลักกฎหมายที่ใช้]"""
+
+_SECTION_TEMPLATES = {
+    "Ruling_Committee": _RULING_SECTIONS,
+    "Ruling_AttorneyGeneral": _RULING_SECTIONS,
+    "Ruling_Court": _COURT_SECTIONS,
+    "Circular": _CIRCULAR_SECTIONS,
+    "default": _RULING_SECTIONS,
+}
+
 _CLASSIFY_PROMPT = """
 You are a legal document expert. Classify this Thai government document into ONE of these categories:
 
-1. "Ruling_Committee" — ข้อหารือ กวจ. / กรมบัญชีกลาง / คณะกรรมการวินิจฉัยปัญหาการจัดซื้อจัดจ้าง
+1. "Ruling_Committee" — ข้อหารือ กวจ. / คณะกรรมการวินิจฉัยปัญหาการจัดซื้อจัดจ้าง
+   answering a specific case from a single agency. Has ## ข้อเท็จจริง about that
+   agency's situation + ## ประเด็นข้อหารือ (questions asked) + ## ข้อวินิจฉัย (ruling).
+
 2. "Ruling_Court" — คำพิพากษาศาลปกครอง / ศาลปกครองสูงสุด
+
 3. "Ruling_AttorneyGeneral" — ข้อหารือสำนักงานอัยการสูงสุด
-4. "Circular" — หนังสือเวียน / ว...
+
+4. "Circular" — หนังสือเวียน issued TO ALL agencies (not a specific-case ruling).
+   Strong signals — if ANY apply, this is "Circular":
+   - Doc number contains "ว" (e.g. "ที่ กค (กวจ) ๐๔๐๕.๒/ว ๒๑๐" or "ว๖๔๕")
+   - Subject starts with "แนวทางปฏิบัติ", "ซ้อมความเข้าใจ", "มาตรการ", "การยกเว้น",
+     "การอนุมัติยกเว้น", "การผ่อนผัน", "หลักเกณฑ์"
+   - Has "การใช้บังคับ" / "ให้มีผลใช้บังคับตั้งแต่..." section
+   - Addresses "หัวหน้าหน่วยงานของรัฐทุกแห่ง" or no specific recipient
+   - NO ## ข้อเท็จจริง of a specific case (general principle only)
+   Note: กรมบัญชีกลาง / กวจ. / คณะกรรมการวินิจฉัยฯ also issue circulars
+   — issuing body alone does NOT make it Ruling_Committee.
+
 5. "Contract" — สัญญาจ้าง / สัญญาซื้อขาย
+
 6. "Unknown" — ไม่แน่ใจ
 
-Analyze the header, logos, reference number format, and subject line.
+Decision rule: if doc_number has "ว" → Circular. Issuer identity is secondary.
 
 Return STRICT JSON only:
 {"type": "CategoryName", "confidence": 0.0, "reasoning": "brief reason"}
@@ -144,25 +213,26 @@ file_url: "https://drive.google.com/file/d/{file_id}/view"
 
 # [title from document]
 
-## ข้อเท็จจริง
-[คัดลอกข้อความในส่วนข้อเท็จจริงออกมาทั้งหมด verbatim]
-
-## ประเด็นข้อหารือ
-[คัดลอกประเด็นคำถามที่หน่วยงานขอหารือออกมาทั้งหมด verbatim ทุกข้อ เช่น ๑. ... ๒. ... ๓. ...
-ห้ามสรุปหรืออ้างอิงว่า "ตามที่กล่าวข้างต้น" ต้องคัดลอกข้อความจริงออกมาทั้งหมด]
-
-## ข้อวินิจฉัย
-[คัดลอกข้อวินิจฉัยของคณะกรรมการออกมาทั้งหมด verbatim ทุกข้อ]
-
-## สรุปข้อวินิจฉัย
-[สรุปเป็น bullet points ครบทุกประเด็นที่วินิจฉัย ไม่จำกัดจำนวน — ต้องมีทุกข้อหารือที่ปรากฏ]
+{section_template}
 
 **Rules:**
 - คัดลอกข้อความ verbatim ทุก section — ห้ามสรุป ห้ามตัด ห้ามอ้างอิงกลับ
-- ส่วน ประเด็นข้อหารือ ต้องมีทุกประเด็นที่ปรากฏในเอกสาร (๑. ๒. ๓. ...)
+- ใช้ section heading ตามที่กำหนดใน template ข้างต้น — ห้ามเปลี่ยนชื่อ ห้ามเพิ่ม/ลด section
+- **ตารางทุกตารางในเอกสารต้องคงไว้ครบทุกตาราง** — แม้เนื้อหาในตารางจะดูซ้ำกับข้อความ
+  ก่อนหน้า ก็ห้ามตัดทิ้ง ตารางคือส่วนของเอกสารต้นฉบับและต้องคัดลอก verbatim ทุก row/column
+- **laws_referenced ต้องคงรายละเอียด วรรค/อนุมาตรา/(เลข) ตามที่ปรากฏในเอกสาร**
+  ตัวอย่าง — ถ้าเอกสารระบุ "มาตรา ๒๙ วรรคหนึ่ง (๔)" ต้องเขียนครบทั้งสามส่วน
+  ห้ามย่อเป็น "มาตรา ๒๙" เพียงอย่างเดียว
+- **quality_note** เขียนเฉพาะปัญหา OCR ของตัวเอง (ภาพเบลอ ตัวอักษรไม่ชัด หน้าขาด ฯลฯ)
+  ห้ามวิจารณ์เนื้อหาเอกสาร ห้าม flag เรื่องวันที่/ปี พ.ศ./ค.ศ. (ระบบจัดการให้แล้ว)
+  ถ้า OCR สำเร็จไม่มีปัญหา ให้ใส่ `quality: "good"` และ `quality_note: ""`
 - date ต้องใช้ปี ค.ศ. (CE) เสมอ เช่น 2023-07-27 ไม่ใช่ 2566-07-27
 - date_be ใช้ปี พ.ศ. (BE = CE + 543) เช่น 2566-07-27
-- Preserve tables as markdown tables
+- Tables: ใช้ markdown table ปกติ — column separator ห้ามเกิน 4 dash ต่อ column
+  (ห้าม `:----------------------...` ที่ยาวเกิน) ใช้ `| :--- |` หรือ `| --- |` พอ
+- ห้ามใส่ `*`, `..`, dot-leader (`.....`), หรือ `___` แทน blank field ในเอกสาร —
+  ปล่อยว่าง หรือใช้ `—` (em-dash) ถ้าจำเป็น
+- ห้ามคัดลอก dot-leader ของหัวกระดาษ (`. . . . . . .`) ที่ใช้คั่นเลขข้อกับช่องว่าง
 - Output raw Markdown only — NO code fences (no ```)
 - YAML values with special chars must be quoted
 - tags and laws_referenced must be YAML lists
@@ -379,32 +449,14 @@ def _client() -> genai.Client:
     return get_client()
 
 
-def _upload_pdf(client: genai.Client, pdf_bytes: bytes, filename: str = "document.pdf"):
-    """Upload PDF bytes to Gemini File API. Returns uploaded file object."""
-    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(pdf_bytes)
-        tmp_path = tmp.name
+def _pdf_part(pdf_bytes: bytes):
+    """Wrap PDF bytes as an inline Part — works on both Vertex and AI Studio.
 
-    try:
-        uploaded = client.files.upload(
-            file=tmp_path,
-            config={"mime_type": "application/pdf", "display_name": filename},
-        )
-        while uploaded.state.name == "PROCESSING":
-            time.sleep(1)
-            uploaded = client.files.get(name=uploaded.name)
-        if uploaded.state.name == "FAILED":
-            raise RuntimeError(f"Gemini file processing failed: {uploaded.name}")
-        return uploaded
-    finally:
-        os.unlink(tmp_path)
-
-
-def _cleanup(client: genai.Client, uploaded_file) -> None:
-    try:
-        client.files.delete(name=uploaded_file.name)
-    except Exception:
-        pass
+    The previous File-API upload path is AI-Studio-only; Vertex rejects it with
+    "This method is only supported in the Gemini Developer client." Inline data
+    is supported on both backends up to ~20 MB per request.
+    """
+    return genai_types.Part.from_bytes(data=pdf_bytes, mime_type="application/pdf")
 
 
 _KEYWORDS_PROMPT = """\
@@ -520,11 +572,11 @@ def generate_anchor(text: str) -> str:
 def classify(pdf_bytes: bytes) -> dict:
     """Phase 1: Classify document type."""
     client = _client()
-    uploaded = _upload_pdf(client, pdf_bytes)
+    part = _pdf_part(pdf_bytes)
     try:
         response = client.models.generate_content(
             model=GEMINI_FLASH_MODEL,
-            contents=[_CLASSIFY_PROMPT, uploaded],
+            contents=[_CLASSIFY_PROMPT, part],
             config=genai_types.GenerateContentConfig(
                 response_mime_type="application/json",
             ),
@@ -535,8 +587,19 @@ def classify(pdf_bytes: bytes) -> dict:
     except Exception as e:
         logger.warning(f"Classification failed: {e}")
         return {"type": "Unknown", "confidence": 0.0}
-    finally:
-        _cleanup(client, uploaded)
+
+
+_TABLE_DASH_RE = re.compile(r"-{5,}")
+
+
+def _normalize_tables(text: str) -> str:
+    """Collapse runaway dash padding in markdown table separators.
+
+    Gemini sometimes outputs `| :--------------------- |` with hundreds of
+    dashes per column, ballooning file size and breaking renderers. Compress
+    any run of 5+ dashes back to 4. Preserves leading `:` for alignment.
+    """
+    return _TABLE_DASH_RE.sub("----", text)
 
 
 def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str:
@@ -544,38 +607,40 @@ def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str
     client = _client()
 
     schema_fields = _SCHEMA.get(doc_type, _SCHEMA["default"]).strip()
+    section_template = _SECTION_TEMPLATES.get(doc_type, _SECTION_TEMPLATES["default"]).strip()
     prompt = _EXTRACT_PROMPT_TEMPLATE.format(
         filename=filename,
         schema_fields=schema_fields,
+        section_template=section_template,
         file_id=file_id,
     )
 
-    uploaded = _upload_pdf(client, pdf_bytes, filename=filename)
-    try:
-        response = client.models.generate_content_stream(
-            model=GEMINI_FLASH_MODEL,
-            contents=[prompt, uploaded],
-            config=genai_types.GenerateContentConfig(),
-        )
-        text = ""
-        for chunk in response:
-            if chunk.text:
-                text += chunk.text
+    part = _pdf_part(pdf_bytes)
+    response = client.models.generate_content_stream(
+        model=OCR_EXTRACT_MODEL,
+        contents=[prompt, part],
+        config=genai_types.GenerateContentConfig(),
+    )
+    text = ""
+    for chunk in response:
+        if chunk.text:
+            text += chunk.text
 
-        # Strip code fences if Gemini added them
-        text = text.strip()
-        if text.startswith("```"):
-            lines = text.splitlines()
-            lines = lines[1:] if lines[0].startswith("```") else lines
-            lines = lines[:-1] if lines and lines[-1].startswith("```") else lines
-            text = "\n".join(lines).strip()
+    # Strip code fences if Gemini added them
+    text = text.strip()
+    if text.startswith("```"):
+        lines = text.splitlines()
+        lines = lines[1:] if lines[0].startswith("```") else lines
+        lines = lines[:-1] if lines and lines[-1].startswith("```") else lines
+        text = "\n".join(lines).strip()
 
-        # Fix frontmatter indentation issues
-        text = _fix_frontmatter(text)
+    # Fix frontmatter indentation issues
+    text = _fix_frontmatter(text)
 
-        return text
-    finally:
-        _cleanup(client, uploaded)
+    # Collapse runaway dash padding in table separators (Gemini OCR artifact)
+    text = _normalize_tables(text)
+
+    return text
 
 
 def pdf_to_markdown(
@@ -607,6 +672,16 @@ def pdf_to_markdown(
     confidence = classification.get("confidence", 0.0)
     logger.info(f"Classified '{filename}' → {doc_type} ({confidence*100:.0f}%)")
 
+    # Filename safety net: any file whose doc-number segment starts with "ว" is a
+    # circular, regardless of issuer. The classifier sometimes mis-routes these
+    # to Ruling_Committee because กวจ./กรมบัญชีกลาง issues both rulings AND circulars.
+    if doc_type != "Circular" and re.search(r"_ว\d", filename):
+        logger.info(
+            f"Filename override: '{filename}' has ว-prefix doc number → Circular "
+            f"(was {doc_type})"
+        )
+        doc_type = "Circular"
+
     # Phase 2: Extract
     text = extract(pdf_bytes, file_id=file_id, filename=filename, doc_type=doc_type)
 
@@ -621,7 +696,7 @@ def pdf_to_markdown(
     page_count = _get_page_count(pdf_bytes)
     text = _inject_frontmatter_fields(text, {
         "page_count": page_count,
-        "ocr_engine": GEMINI_FLASH_MODEL,
+        "ocr_engine": OCR_EXTRACT_MODEL,
         "ocr_date": ocr_date,
         "status": "active",
         "status_note": "unverified",

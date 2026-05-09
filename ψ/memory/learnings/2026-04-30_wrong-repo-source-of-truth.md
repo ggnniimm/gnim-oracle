@@ -1,6 +1,9 @@
 # Source-of-truth for thai-legal-rag MDs is `gnim-oracle-qdrant`, not `gnim-oracle` (2026-04-30)
 
-## TL;DR
+> ⚠️ **SUPERSEDED 2026-04-30 afternoon** by `2026-04-30_corpus-resync-and-tc044-tc050-fixes.md`.
+> The corpus resync that same day copied the canonical 1,385 MDs from `gnim-oracle-qdrant` INTO `gnim-oracle/.../md_backup/` and re-indexed prod from there. **Canonical is now `gnim-oracle/.../md_backup/`** (this repo). The qdrant repo's `lab/.../md_backup/` no longer exists; old MDs live at `gnim-oracle-qdrant/ψ/archive/data_with_ac/md_backup/` as a frozen snapshot (mtime 2026-03-16, do not edit). The TL;DR below was true at time of writing (morning of 04-30) but has been false since that afternoon. Verified by file_id set comparison vs prod Qdrant on 2026-05-09: every file_id in `gnim-oracle/.../md_backup/` is in prod (1,385/1,385); only 862/1,115 of qdrant-archive's file_ids are in prod, with 253 orphans.
+
+## TL;DR (HISTORICAL — see superseding banner above)
 
 For thai-legal-rag work, **always edit `gnim-oracle-qdrant/ψ/lab/thai-legal-rag/data/md_backup/`**. The `gnim-oracle/...` copy in this current repo is **outdated by 152 files (the entire AC folder of court judgments) and has 96% stale `file_id`s** that 404 on Drive.
 
