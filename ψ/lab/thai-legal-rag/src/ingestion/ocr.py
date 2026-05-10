@@ -17,6 +17,7 @@ import os
 import re
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -29,7 +30,7 @@ from src.config import (
     MD_BACKUP_DIR,
     OCR_CACHE_DIR,
 )
-from src.gemini_client import get_client
+from src.gemini_client import get_client, get_ocr_client
 
 logger = logging.getLogger(__name__)
 
@@ -463,6 +464,13 @@ def _client() -> genai.Client:
     return get_client()
 
 
+def _ocr_client() -> genai.Client:
+    return get_ocr_client()
+
+
+_PAGE_CALL_TIMEOUT = 300  # seconds — thread-level timeout per page (matches ocr_v4.py)
+
+
 def _pdf_part(pdf_bytes: bytes):
     """Wrap PDF bytes as an inline Part — works on both Vertex and AI Studio.
 
@@ -701,28 +709,45 @@ def extract(
 
     if per_page:
         # --- Per-page path: PDF → PNG (300 DPI) → Pro extract per page → Pro structure ---
+        # Uses us-central1 quota pool (separate from global embedding pool).
         page_images = _pdf_pages_to_images(pdf_bytes)
         page_count = len(page_images)
-        logger.info(f"  Per-page Pro extraction: {page_count} pages @ 300 DPI, delay={page_delay}s")
+        logger.info(f"  Per-page Pro extraction: {page_count} pages @ 300 DPI, delay={page_delay}s (us-central1)")
 
+        # Intermediate save: persist raw pages so far to disk after each page.
+        raw_cache = OCR_CACHE_DIR / f"{hashlib.sha256(file_id.encode()).hexdigest()[:16]}_raw.json"
+        ocr_client = _ocr_client()
         raw_pages = []
+
         for i, png_bytes in enumerate(page_images, 1):
             logger.info(f"    Page {i}/{page_count} ({len(png_bytes)//1024} KB)")
+            page_prompt = _EXTRACT_PAGE_RAW_PROMPT_TEMPLATE.format(
+                page_num=i, total_pages=page_count,
+            )
+            img_part = genai_types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+
             try:
-                page_prompt = _EXTRACT_PAGE_RAW_PROMPT_TEMPLATE.format(
-                    page_num=i, total_pages=page_count,
-                )
-                img_part = genai_types.Part.from_bytes(data=png_bytes, mime_type="image/png")
-                resp = client.models.generate_content(
-                    model=OCR_EXTRACT_MODEL,
-                    contents=[page_prompt, img_part],
-                )
+                with ThreadPoolExecutor(max_workers=1) as ex:
+                    future = ex.submit(
+                        ocr_client.models.generate_content,
+                        model=OCR_EXTRACT_MODEL,
+                        contents=[page_prompt, img_part],
+                    )
+                    resp = future.result(timeout=_PAGE_CALL_TIMEOUT)
                 page_text = (resp.text or "").strip()
                 if page_text and page_text != "---BLANK---":
                     raw_pages.append(f"<!-- Page {i} -->\n{page_text}")
+                    logger.info(f"    Page {i} ✓ {len(page_text):,} chars")
+            except FutureTimeoutError:
+                logger.warning(f"    Page {i} timed out after {_PAGE_CALL_TIMEOUT}s — placeholder")
+                raw_pages.append(f"<!-- Page {i} -->\n[หน้า {i}: timeout]")
             except Exception as e:
-                logger.warning(f"    Page {i} extraction failed: {e} — inserting placeholder")
+                logger.warning(f"    Page {i} failed: {e} — placeholder")
                 raw_pages.append(f"<!-- Page {i} -->\n[หน้า {i}: extraction failed — {e}]")
+
+            # Persist progress after every page
+            raw_cache.write_text(json.dumps(raw_pages, ensure_ascii=False), encoding="utf-8")
+
             if i < page_count and page_delay > 0:
                 time.sleep(page_delay)
 
@@ -741,7 +766,7 @@ def extract(
             config=genai_types.GenerateContentConfig(),
         )
     else:
-        # --- Original single-call path ---
+        # --- Original single-call path (also uses us-central1) ---
         prompt = _EXTRACT_PROMPT_TEMPLATE.format(
             filename=filename,
             schema_fields=schema_fields,
@@ -749,7 +774,8 @@ def extract(
             file_id=file_id,
         )
         part = _pdf_part(pdf_bytes)
-        response = client.models.generate_content_stream(
+        ocr_client = _ocr_client()
+        response = ocr_client.models.generate_content_stream(
             model=OCR_EXTRACT_MODEL,
             contents=[prompt, part],
             config=genai_types.GenerateContentConfig(),

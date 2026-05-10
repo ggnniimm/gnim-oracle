@@ -20,6 +20,9 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 GOOGLE_CLOUD_PROJECT = os.getenv("GOOGLE_CLOUD_PROJECT", "").strip()
 GOOGLE_CLOUD_LOCATION = os.getenv("GOOGLE_CLOUD_LOCATION", "us-central1").strip()
 USE_VERTEX_AI = bool(GOOGLE_CLOUD_PROJECT)
+# OCR uses a dedicated location to avoid exhausting the global embedding quota pool.
+# us-central1 has separate Pro quota from global.
+OCR_LOCATION = os.getenv("OCR_LOCATION", "us-central1")
 
 GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive"]
 # OAuth2 paths (set via env or use defaults)

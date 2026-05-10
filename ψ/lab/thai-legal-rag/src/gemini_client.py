@@ -11,6 +11,7 @@ from src.config import (
     GEMINI_API_KEYS,
     GOOGLE_CLOUD_PROJECT,
     GOOGLE_CLOUD_LOCATION,
+    OCR_LOCATION,
     USE_VERTEX_AI,
 )
 
@@ -57,6 +58,23 @@ def get_client() -> genai.Client:
         api_key=_next_key(),
         http_options={"timeout": DEFAULT_TIMEOUT_MS},
     )
+
+
+def get_ocr_client() -> genai.Client:
+    """Return a Gemini client pinned to OCR_LOCATION (us-central1).
+
+    OCR extraction uses a separate Vertex AI location from the embedding client
+    (which must be on 'global' for gemini-embedding-2). This gives OCR its own
+    Pro quota pool and avoids quota cross-contamination.
+    """
+    if USE_VERTEX_AI:
+        return genai.Client(
+            vertexai=True,
+            project=GOOGLE_CLOUD_PROJECT,
+            location=OCR_LOCATION,
+            http_options={"timeout": DEFAULT_TIMEOUT_MS},
+        )
+    return get_client()  # AI Studio: location doesn't apply
 
 
 _TRANSIENT_MARKERS = (
