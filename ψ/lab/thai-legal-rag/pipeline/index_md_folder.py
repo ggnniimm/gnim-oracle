@@ -18,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from tqdm import tqdm
 
-from src.ingestion.md_loader import load_md_file
+from src.ingestion.md_loader import load_md_file, _parse_frontmatter
 from src.ingestion.dedup import is_indexed, mark_indexed, stats as dedup_stats
 from src.indexing.manager import IndexManager
 from src.config import DEDUP_DB
@@ -118,7 +118,14 @@ def main():
         vector_store = index.vector
         for md_file in md_files:
             chunks = load_md_file(md_file)
-            source_name = chunks[0].metadata.get("source_name") if chunks else md_file.name
+            if chunks:
+                source_name = chunks[0].metadata.get("source_name") or md_file.name
+            else:
+                # Inactive or empty file — parse frontmatter directly so delete_by_source_name
+                # matches the .pdf source_name stored in Qdrant (not the .md filename).
+                text = md_file.read_text(encoding="utf-8")
+                meta, _ = _parse_frontmatter(text)
+                source_name = meta.get("source_file") or meta.get("original_filename") or md_file.name
 
             # 1. Delete from vector store
             n_vec = vector_store.delete_by_source_name(source_name)
