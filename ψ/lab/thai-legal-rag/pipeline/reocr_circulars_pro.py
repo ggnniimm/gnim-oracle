@@ -63,7 +63,8 @@ def collect_targets(md_dir: Path) -> list[dict]:
         text = md_path.read_text(encoding="utf-8")
         doc_type = _get_frontmatter_field(text, "doc_type")
         ocr_engine = _get_frontmatter_field(text, "ocr_engine")
-        if doc_type == "หนังสือเวียน" and ocr_engine == "gemini-2.0-flash":
+        status = _get_frontmatter_field(text, "status")
+        if doc_type == "หนังสือเวียน" and ocr_engine == "gemini-2.0-flash" and status != "inactive":
             file_id = _get_frontmatter_field(text, "file_id")
             original_filename = _get_frontmatter_field(text, "original_filename")
             if not file_id:
@@ -77,13 +78,23 @@ def collect_targets(md_dir: Path) -> list[dict]:
     return targets
 
 
-def ocr_with_retry(pdf_bytes: bytes, file_id: str, filename: str, max_retries: int = 3) -> dict:
+def ocr_with_retry(
+    pdf_bytes: bytes,
+    file_id: str,
+    filename: str,
+    max_retries: int = 3,
+    per_page: bool = False,
+    page_delay: float = 3.0,
+) -> dict:
     """Call pdf_to_markdown with exponential backoff on any exception."""
     delays = [30, 60, 120]
     last_exc = None
     for attempt in range(max_retries + 1):
         try:
-            return pdf_to_markdown(pdf_bytes, file_id=file_id, filename=filename, force=True)
+            return pdf_to_markdown(
+                pdf_bytes, file_id=file_id, filename=filename,
+                force=True, per_page=per_page, page_delay=page_delay,
+            )
         except Exception as e:
             last_exc = e
             if attempt < max_retries:
@@ -100,6 +111,11 @@ def parse_args():
     p.add_argument("--dry-run", action="store_true", help="List targets only, no OCR")
     p.add_argument("--delay", type=float, default=10.0,
                    help="Seconds to wait between docs (default 10s, avoids Pro quota bursts)")
+    p.add_argument("--per-page", action="store_true",
+                   help="Extract raw text per page with Pro, then structure in one final Pro call. "
+                        "Avoids streaming timeout on large PDFs. Uses page_count+1 Pro calls per doc.")
+    p.add_argument("--page-delay", type=float, default=15.0,
+                   help="Seconds to wait between page extractions in --per-page mode (default 15s)")
     return p.parse_args()
 
 
@@ -142,7 +158,10 @@ def main():
             logger.info(f"  PDF: {pdf_size_kb:.0f} KB")
 
             t0 = time.time()
-            result = ocr_with_retry(pdf_bytes, file_id=file_id, filename=filename)
+            result = ocr_with_retry(
+                pdf_bytes, file_id=file_id, filename=filename,
+                per_page=args.per_page, page_delay=args.page_delay,
+            )
             ocr_s = time.time() - t0
 
             doc_type = result.get("doc_type", "?")

@@ -403,6 +403,20 @@ def _get_page_count(pdf_bytes: bytes) -> int:
         return 0
 
 
+def _pdf_pages_to_images(pdf_bytes: bytes, dpi: int = 300) -> list[bytes]:
+    """Render each PDF page to PNG bytes at 300 DPI using pymupdf."""
+    import fitz
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    zoom = dpi / 72  # pymupdf native resolution is 72 DPI
+    mat = fitz.Matrix(zoom, zoom)
+    images = []
+    for page in doc:
+        pix = page.get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+        images.append(pix.tobytes("png"))
+    doc.close()
+    return images
+
+
 
 def _cache_path(file_id: str) -> Path:
     h = hashlib.sha256(file_id.encode()).hexdigest()[:16]
@@ -591,6 +605,71 @@ def classify(pdf_bytes: bytes) -> dict:
 
 _TABLE_DASH_RE = re.compile(r"-{5,}")
 
+_EXTRACT_PAGE_RAW_PROMPT_TEMPLATE = """\
+คุณคือหุ่นยนต์ OCR ระดับสูง ถอดข้อความจากภาพหน้าเอกสารราชการไทยนี้แบบ 100% Verbatim
+
+══ ข้อมูลหน้านี้ ══
+นี่คือหน้าที่ {page_num} จากทั้งหมด {total_pages} หน้า
+
+══ กฎเหล็ก ══
+1. ถอดข้อความคำต่อคำ ห้ามสรุป ห้ามข้าม ห้ามแก้คำผิด แม้ต้นฉบับจะพิมพ์ผิด
+2. รักษาเลขไทยตามต้นฉบับ ห้ามแปลงเป็นเลขอารบิก
+3. รักษาโครงสร้าง: หัวกระดาษ (เลขที่ วันที่ เรื่อง) เนื้อหา ลำดับข้อ (๑. ๒. ๓.๑ ฯลฯ) ตาราง ลายเซ็น/ส่วนท้าย
+4. ห้ามมีคำเกริ่นนำหรือคำอธิบายประกอบ
+5. ถ้าหน้าว่างหรือมีแต่รูปภาพไม่มีข้อความ ให้ตอบ: ---BLANK---
+
+══ ตัวเลขที่มักอ่านผิด (ระวังเป็นพิเศษ) ══
+• ๒ (สอง) vs ๖ (หก)
+• ๔ (สี่) vs ๕ (ห้า) vs ๙ (เก้า)
+• ๘ (แปด) vs ๓ (สาม)
+"""
+
+_STRUCTURE_FROM_RAW_PROMPT_TEMPLATE = """
+You are an expert OCR engine for Thai legal government documents.
+Convert this extracted text (from {page_count} pages) into Markdown with a YAML Frontmatter block.
+
+**Output format — EXACTLY this structure:**
+
+---
+original_filename: {filename}
+{schema_fields}
+file_id: "{file_id}"
+file_url: "https://drive.google.com/file/d/{file_id}/view"
+---
+
+# [title from document]
+
+{section_template}
+
+**Rules:**
+- คัดลอกข้อความ verbatim ทุก section — ห้ามสรุป ห้ามตัด ห้ามอ้างอิงกลับ
+- ใช้ section heading ตามที่กำหนดใน template ข้างต้น — ห้ามเปลี่ยนชื่อ ห้ามเพิ่ม/ลด section
+- **ตารางทุกตารางในเอกสารต้องคงไว้ครบทุกตาราง** — แม้เนื้อหาในตารางจะดูซ้ำกับข้อความ
+  ก่อนหน้า ก็ห้ามตัดทิ้ง ตารางคือส่วนของเอกสารต้นฉบับและต้องคัดลอก verbatim ทุก row/column
+- **laws_referenced ต้องคงรายละเอียด วรรค/อนุมาตรา/(เลข) ตามที่ปรากฏในเอกสาร**
+  ตัวอย่าง — ถ้าเอกสารระบุ "มาตรา ๒๙ วรรคหนึ่ง (๔)" ต้องเขียนครบทั้งสามส่วน
+  ห้ามย่อเป็น "มาตรา ๒๙" เพียงอย่างเดียว
+- **quality_note** เขียนเฉพาะปัญหา OCR ของตัวเอง (ภาพเบลอ ตัวอักษรไม่ชัด หน้าขาด ฯลฯ)
+  ห้ามวิจารณ์เนื้อหาเอกสาร ห้าม flag เรื่องวันที่/ปี พ.ศ./ค.ศ. (ระบบจัดการให้แล้ว)
+  ถ้า OCR สำเร็จไม่มีปัญหา ให้ใส่ `quality: "good"` และ `quality_note: ""`
+- date ต้องใช้ปี ค.ศ. (CE) เสมอ เช่น 2023-07-27 ไม่ใช่ 2566-07-27
+- date_be ใช้ปี พ.ศ. (BE = CE + 543) เช่น 2566-07-27
+- Tables: ใช้ markdown table ปกติ — column separator ห้ามเกิน 4 dash ต่อ column
+  (ห้าม `:----------------------...` ที่ยาวเกิน) ใช้ `| :--- |` หรือ `| --- |` พอ
+- ห้ามใส่ `*`, `..`, dot-leader (`.....`), หรือ `___` แทน blank field ในเอกสาร —
+  ปล่อยว่าง หรือใช้ `—` (em-dash) ถ้าจำเป็น
+- ห้ามคัดลอก dot-leader ของหัวกระดาษ (`. . . . . . .`) ที่ใช้คั่นเลขข้อกับช่องว่าง
+- Output raw Markdown only — NO code fences (no ```)
+- YAML values with special chars must be quoted
+- tags and laws_referenced must be YAML lists
+
+---
+
+**ข้อความต้นฉบับ (คัดลอก verbatim, {page_count} หน้า):**
+
+{raw_text}
+"""
+
 
 def _normalize_tables(text: str) -> str:
     """Collapse runaway dash padding in markdown table separators.
@@ -602,25 +681,80 @@ def _normalize_tables(text: str) -> str:
     return _TABLE_DASH_RE.sub("----", text)
 
 
-def extract(pdf_bytes: bytes, file_id: str, filename: str, doc_type: str) -> str:
-    """Phase 2: Extract full content with type-specific schema."""
-    client = _client()
+def extract(
+    pdf_bytes: bytes,
+    file_id: str,
+    filename: str,
+    doc_type: str,
+    per_page: bool = False,
+    page_delay: float = 15.0,
+) -> str:
+    """Phase 2: Extract full content with type-specific schema.
 
+    per_page=True: Pro extracts raw text from each page individually, then
+    Pro structures the combined raw text into the schema. Avoids streaming
+    timeout on large PDFs at the cost of more Pro API calls.
+    """
+    client = _client()
     schema_fields = _SCHEMA.get(doc_type, _SCHEMA["default"]).strip()
     section_template = _SECTION_TEMPLATES.get(doc_type, _SECTION_TEMPLATES["default"]).strip()
-    prompt = _EXTRACT_PROMPT_TEMPLATE.format(
-        filename=filename,
-        schema_fields=schema_fields,
-        section_template=section_template,
-        file_id=file_id,
-    )
 
-    part = _pdf_part(pdf_bytes)
-    response = client.models.generate_content_stream(
-        model=OCR_EXTRACT_MODEL,
-        contents=[prompt, part],
-        config=genai_types.GenerateContentConfig(),
-    )
+    if per_page:
+        # --- Per-page path: PDF → PNG (300 DPI) → Pro extract per page → Pro structure ---
+        page_images = _pdf_pages_to_images(pdf_bytes)
+        page_count = len(page_images)
+        logger.info(f"  Per-page Pro extraction: {page_count} pages @ 300 DPI, delay={page_delay}s")
+
+        raw_pages = []
+        for i, png_bytes in enumerate(page_images, 1):
+            logger.info(f"    Page {i}/{page_count} ({len(png_bytes)//1024} KB)")
+            try:
+                page_prompt = _EXTRACT_PAGE_RAW_PROMPT_TEMPLATE.format(
+                    page_num=i, total_pages=page_count,
+                )
+                img_part = genai_types.Part.from_bytes(data=png_bytes, mime_type="image/png")
+                resp = client.models.generate_content(
+                    model=OCR_EXTRACT_MODEL,
+                    contents=[page_prompt, img_part],
+                )
+                page_text = (resp.text or "").strip()
+                if page_text and page_text != "---BLANK---":
+                    raw_pages.append(f"<!-- Page {i} -->\n{page_text}")
+            except Exception as e:
+                logger.warning(f"    Page {i} extraction failed: {e} — inserting placeholder")
+                raw_pages.append(f"<!-- Page {i} -->\n[หน้า {i}: extraction failed — {e}]")
+            if i < page_count and page_delay > 0:
+                time.sleep(page_delay)
+
+        raw_text = "\n\n".join(raw_pages)
+        prompt = _STRUCTURE_FROM_RAW_PROMPT_TEMPLATE.format(
+            filename=filename,
+            schema_fields=schema_fields,
+            section_template=section_template,
+            file_id=file_id,
+            page_count=page_count,
+            raw_text=raw_text,
+        )
+        response = client.models.generate_content_stream(
+            model=OCR_EXTRACT_MODEL,
+            contents=[prompt],
+            config=genai_types.GenerateContentConfig(),
+        )
+    else:
+        # --- Original single-call path ---
+        prompt = _EXTRACT_PROMPT_TEMPLATE.format(
+            filename=filename,
+            schema_fields=schema_fields,
+            section_template=section_template,
+            file_id=file_id,
+        )
+        part = _pdf_part(pdf_bytes)
+        response = client.models.generate_content_stream(
+            model=OCR_EXTRACT_MODEL,
+            contents=[prompt, part],
+            config=genai_types.GenerateContentConfig(),
+        )
+
     text = ""
     for chunk in response:
         if chunk.text:
@@ -648,6 +782,8 @@ def pdf_to_markdown(
     file_id: str,
     filename: str = "document.pdf",
     force: bool = False,
+    per_page: bool = False,
+    page_delay: float = 15.0,
 ) -> dict:
     """
     Main OCR entry point. Two-phase: classify → extract.
@@ -683,7 +819,10 @@ def pdf_to_markdown(
         doc_type = "Circular"
 
     # Phase 2: Extract
-    text = extract(pdf_bytes, file_id=file_id, filename=filename, doc_type=doc_type)
+    text = extract(
+        pdf_bytes, file_id=file_id, filename=filename, doc_type=doc_type,
+        per_page=per_page, page_delay=page_delay,
+    )
 
     # Cross-check doc_number against filename (filename is authoritative for the numeric part)
     text = _fix_doc_number_from_filename(text, filename)
