@@ -556,7 +556,7 @@ def generate_anchor(text: str) -> str:
     kw_truncated = text[:8000]
     sum_truncated = text[:4000]
     try:
-        client = _client()
+        client = _ocr_client()
 
         # Part 1: Keywords from full text (larger window)
         response = client.models.generate_content(
@@ -593,7 +593,7 @@ def generate_anchor(text: str) -> str:
 
 def classify(pdf_bytes: bytes) -> dict:
     """Phase 1: Classify document type."""
-    client = _client()
+    client = _ocr_client()
     part = _pdf_part(pdf_bytes)
     try:
         response = client.models.generate_content(
@@ -703,7 +703,7 @@ def extract(
     Pro structures the combined raw text into the schema. Avoids streaming
     timeout on large PDFs at the cost of more Pro API calls.
     """
-    client = _client()
+    client = _ocr_client()
     schema_fields = _SCHEMA.get(doc_type, _SCHEMA["default"]).strip()
     section_template = _SECTION_TEMPLATES.get(doc_type, _SECTION_TEMPLATES["default"]).strip()
 
