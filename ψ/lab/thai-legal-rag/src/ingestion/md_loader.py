@@ -150,6 +150,9 @@ def load_md_file(path: Path | str) -> list[Chunk]:
     text = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(text)
 
+    if meta.get("status") == "inactive":
+        return []
+
     # Normalize metadata keys to what the pipeline expects.
     base_meta = {
         "file_id": meta.get("file_id", ""),

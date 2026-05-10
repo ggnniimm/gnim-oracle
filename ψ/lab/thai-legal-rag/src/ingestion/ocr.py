@@ -675,7 +675,7 @@ def pdf_to_markdown(
     # Filename safety net: any file whose doc-number segment starts with "ว" is a
     # circular, regardless of issuer. The classifier sometimes mis-routes these
     # to Ruling_Committee because กวจ./กรมบัญชีกลาง issues both rulings AND circulars.
-    if doc_type != "Circular" and re.search(r"_ว\d", filename):
+    if doc_type != "Circular" and re.search(r"[-_]ว\d", filename):
         logger.info(
             f"Filename override: '{filename}' has ว-prefix doc number → Circular "
             f"(was {doc_type})"
