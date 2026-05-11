@@ -526,6 +526,10 @@ _RULING_SECTION_RE = re.compile(
     r"^##\s+(?:สรุป)?ข้อวินิจฉัย.*$", re.MULTILINE
 )
 
+_H2_HEADING_RE = re.compile(r"^##\s+(.+)$", re.MULTILINE)
+
+_LONG_DOC_ANCHOR_CHAR_THRESHOLD = 25_000
+
 
 def _extract_ruling_sections(text: str) -> str:
     """Extract ข้อวินิจฉัย and สรุปข้อวินิจฉัย sections from markdown."""
@@ -543,32 +547,80 @@ def _extract_ruling_sections(text: str) -> str:
     return "\n\n".join(sections)
 
 
+def _sample_chapters_for_anchor(
+    text: str,
+    per_chapter_chars: int = 1500,
+    max_total: int = 20_000,
+) -> str:
+    """Sample first N chars from every ## section so the anchor sees the whole doc.
+
+    For long multi-chapter documents the default 8K window only covers the
+    frontmatter + first chapter — keywords from later chapters (different form
+    templates, later บท, ภาคผนวก, etc.) are lost. This helper concatenates
+    the YAML frontmatter + a short head-of-section sample from each chapter,
+    capped at max_total chars, so Flash sees one snippet per chapter.
+    """
+    fm_match = re.match(r"^---\n.*?\n---\n", text, re.DOTALL)
+    fm_block = fm_match.group(0) if fm_match else ""
+    body = text[len(fm_block):]
+
+    headings = list(_H2_HEADING_RE.finditer(body))
+    if not headings:
+        return (fm_block + body)[:max_total]
+
+    parts: list[str] = [fm_block]
+    for i, m in enumerate(headings):
+        section_start = m.start()
+        section_end = headings[i + 1].start() if i + 1 < len(headings) else len(body)
+        section = body[section_start:section_end]
+        # Keep the heading line + first per_chapter_chars of the section body
+        parts.append(section[:per_chapter_chars])
+
+    sampled = "\n\n".join(parts)
+    return sampled[:max_total]
+
+
 def generate_anchor(text: str) -> str:
     """Generate a retrieval anchor (บทสรุปสำหรับสืบค้น) from extracted markdown.
 
     Two-part generation to prevent cross-section hallucination:
-    1. Keywords from full document
-    2. Prose summary from ข้อวินิจฉัย sections only (fallback: full text)
+    1. Keywords from full document (or per-chapter samples for long docs)
+    2. Prose summary from ข้อวินิจฉัย sections only (fallback: cover-letter window)
 
     Returns empty string on failure (non-fatal — OCR result is still valid without anchor).
     """
-    # Keywords use larger window (safe — just term extraction)
-    kw_truncated = text[:8000]
+    # Long docs: sample from every chapter so later sections (ภาคผนวก,
+    # additional form templates, บทที่ ๒+) contribute keywords.
+    # Short docs (≤25K chars): the 8K window already covers everything.
+    if len(text) > _LONG_DOC_ANCHOR_CHAR_THRESHOLD:
+        kw_truncated = _sample_chapters_for_anchor(text)
+        logger.info(
+            f"  Anchor: chapter-sampling mode "
+            f"({len(_H2_HEADING_RE.findall(text))} sections, "
+            f"sampled {len(kw_truncated):,}/{len(text):,} chars)"
+        )
+    else:
+        kw_truncated = text[:8000]
     sum_truncated = text[:4000]
-    try:
-        client = _ocr_client()
+    client = _ocr_client()
 
-        # Part 1: Keywords from full text (larger window)
+    # Part 1: Keywords — required, returns empty anchor on failure.
+    try:
         response = client.models.generate_content(
             model=GEMINI_FLASH_MODEL,
             contents=[_KEYWORDS_PROMPT.format(content=kw_truncated)],
         )
         keywords = response.text.strip()
-        if not keywords:
-            return ""
+    except Exception as e:
+        logger.warning(f"Anchor keywords failed (non-fatal): {e}")
+        return ""
+    if not keywords:
+        return ""
 
-        # Part 2: Summary from ruling sections only, or fallback
-        ruling_text = _extract_ruling_sections(text)
+    # Part 2: Summary — best-effort, fall back to keywords-only on failure.
+    # A summary timeout was previously discarding the keywords too.
+    ruling_text = _extract_ruling_sections(text)
+    try:
         if ruling_text:
             ruling_truncated = ruling_text[:3000]
             response = client.models.generate_content(
@@ -581,14 +633,13 @@ def generate_anchor(text: str) -> str:
                 contents=[_FULLTEXT_SUMMARY_PROMPT.format(content=sum_truncated)],
             )
         summary = response.text.strip()
-
-        if not summary:
-            return keywords
-        return f"{keywords}\n\n{summary}"
-
     except Exception as e:
-        logger.warning(f"Anchor generation failed (non-fatal): {e}")
-        return ""
+        logger.warning(f"Anchor summary failed (keywords kept): {e}")
+        return keywords
+
+    if not summary:
+        return keywords
+    return f"{keywords}\n\n{summary}"
 
 
 def classify(pdf_bytes: bytes) -> dict:
@@ -689,6 +740,206 @@ def _normalize_tables(text: str) -> str:
     return _TABLE_DASH_RE.sub("----", text)
 
 
+LONG_DOC_PAGE_THRESHOLD = 20
+
+_LONG_DOC_OUTLINE_PROMPT_TEMPLATE = """\
+You are an expert structurer of Thai legal documents.
+
+This is a long Thai government document ({total_pages} pages). The full raw OCR
+text is provided below, with `<!-- Page N -->` markers separating pages. Read
+it and produce a single JSON object with two keys:
+
+1. "frontmatter": YAML field values for the document header.
+2. "chapters": a list of major sections. Group consecutive pages that belong
+   together. Use natural Thai chapter names — examples:
+     "บทที่ ๑ บทนำและที่มา"
+     "บทที่ ๒ แนวปฏิบัติ"
+     "บทที่ ๓ การใช้บังคับ"
+     "ภาคผนวก ก แบบประกาศประกวดราคา"
+     "ภาคผนวก ข แบบสัญญาจ้าง"
+   Each chapter must specify start_page and end_page (1-indexed, inclusive).
+   All pages from 1 to {total_pages} MUST be covered exactly once — no gaps,
+   no overlaps, chapters in page order, start_page <= end_page.
+
+Return STRICT JSON only — no code fences, no commentary:
+
+{{
+  "frontmatter": {{
+    "doc_type": {schema_doc_type_hint},
+    "issued_by": "...",
+    "date": "YYYY-MM-DD",
+    "doc_number": "เลขที่หนังสือเต็ม เช่น ที่ กค (กวจ) ๐๔๐๕.๒/ว ๑๒๕",
+    "title": "เรื่อง verbatim",
+    "topic": "หมวดหมู่หลัก",
+    "subtopic": "หมวดหมู่ย่อย",
+    "laws_referenced": ["พ.ร.บ./ระเบียบ มาตรา/ข้อ/วรรค ที่อ้างอิง"],
+    "quality": "good|review-needed|low",
+    "quality_note": ""
+  }},
+  "chapters": [
+    {{ "heading": "บทที่ ๑ ...", "start_page": 1, "end_page": N }}
+  ]
+}}
+
+Rules:
+- date in CE (e.g. 2023-03-01) — never พ.ศ. here
+- laws_referenced must include มาตรา/ข้อ/วรรค where present in the doc
+- Cover the full {total_pages} pages with no gaps, no overlaps
+- Pages with only forms/templates should be grouped into a single ภาคผนวก chapter
+
+---
+
+ข้อความต้นฉบับ ({total_pages} หน้า):
+
+{raw_text}
+"""
+
+
+_LONG_DOC_DOC_TYPE_HINT = {
+    "Ruling_Committee": '"ข้อหารือ"',
+    "Ruling_Court": '"คำพิพากษา"',
+    "Ruling_AttorneyGeneral": '"ข้อหารือ"',
+    "Circular": '"หนังสือเวียน"',
+}
+
+
+def _yaml_str(value) -> str:
+    """Escape a value for inclusion in a YAML double-quoted scalar."""
+    if value is None:
+        return ""
+    s = str(value)
+    # Escape backslashes first, then double quotes
+    return s.replace("\\", "\\\\").replace('"', '\\"')
+
+
+def _build_long_doc_yaml(fm: dict, file_id: str, filename: str) -> str:
+    """Build YAML frontmatter block for long-doc mode from extracted fields."""
+    date_ce = (fm.get("date") or "").strip()
+    date_be = ""
+    if len(date_ce) >= 4 and date_ce[:4].isdigit():
+        try:
+            date_be = f"{int(date_ce[:4]) + 543}{date_ce[4:]}"
+        except ValueError:
+            date_be = ""
+
+    laws = fm.get("laws_referenced") or []
+    if isinstance(laws, str):
+        laws = [laws]
+    laws_yaml = "[" + ", ".join(f'"{_yaml_str(l)}"' for l in laws) + "]"
+
+    lines = [
+        "---",
+        f'original_filename: "{_yaml_str(filename)}"',
+        f'doc_type: "{_yaml_str(fm.get("doc_type", ""))}"',
+        f'issued_by: "{_yaml_str(fm.get("issued_by", ""))}"',
+        f'date: "{_yaml_str(date_ce)}"',
+        f'date_be: "{_yaml_str(date_be)}"',
+        f'doc_number: "{_yaml_str(fm.get("doc_number", ""))}"',
+        f'title: "{_yaml_str(fm.get("title", ""))}"',
+        f'topic: "{_yaml_str(fm.get("topic", ""))}"',
+        f'subtopic: "{_yaml_str(fm.get("subtopic", ""))}"',
+        f"laws_referenced: {laws_yaml}",
+        f'quality: "{_yaml_str(fm.get("quality", "good"))}"',
+        f'quality_note: "{_yaml_str(fm.get("quality_note", ""))}"',
+        f'file_id: "{_yaml_str(file_id)}"',
+        f'file_url: "https://drive.google.com/file/d/{_yaml_str(file_id)}/view"',
+        "---",
+    ]
+    return "\n".join(lines)
+
+
+def _structure_long_doc(
+    raw_pages: list[str],
+    file_id: str,
+    filename: str,
+    doc_type: str,
+    ocr_client,
+) -> str:
+    """Long-doc structure mode: one small Pro call for outline, body in Python.
+
+    For documents >LONG_DOC_PAGE_THRESHOLD pages the verbatim 4-section template
+    blows past per-minute token quota / read timeout. Instead, ask Pro for a
+    chapter outline + frontmatter (small JSON output), then assemble the body
+    from raw_pages slices keyed on page ranges. Body content is byte-identical
+    to the raw extraction.
+    """
+    page_count = len(raw_pages)
+    raw_text = "\n\n".join(raw_pages)
+
+    # Same input truncation as the short-doc structure path
+    _MAX_OUTLINE_INPUT_CHARS = 150_000
+    if len(raw_text) > _MAX_OUTLINE_INPUT_CHARS:
+        trimmed = raw_text[:_MAX_OUTLINE_INPUT_CHARS]
+        marker = trimmed.rfind("\n\n<!-- Page ")
+        if marker > 0:
+            trimmed = trimmed[:marker]
+        raw_text_for_outline = trimmed + "\n\n[... ส่วนที่เหลือถูกตัดสำหรับ outline ...]"
+        logger.warning(
+            f"  Long-doc outline input truncated: "
+            f"{len(raw_text):,} → {len(raw_text_for_outline):,} chars"
+        )
+    else:
+        raw_text_for_outline = raw_text
+
+    prompt = _LONG_DOC_OUTLINE_PROMPT_TEMPLATE.format(
+        total_pages=page_count,
+        schema_doc_type_hint=_LONG_DOC_DOC_TYPE_HINT.get(doc_type, '"อื่นๆ"'),
+        raw_text=raw_text_for_outline,
+    )
+
+    logger.info(f"  Long-doc mode: {page_count} pages — requesting outline (Pro)")
+    # 600s timeout: outline processing 150K input chars can be slow when the
+    # Pro pool is busy (observed up to 5+ min on us-central1).
+    outline_client = get_ocr_client(timeout_ms=600_000)
+    response = outline_client.models.generate_content(
+        model=OCR_EXTRACT_MODEL,
+        contents=[prompt],
+        config=genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+        ),
+    )
+    outline = json.loads(response.text)
+    fm = outline.get("frontmatter") or {}
+    chapters = outline.get("chapters") or []
+    if not chapters:
+        raise RuntimeError("Long-doc outline returned empty chapters list")
+    logger.info(f"  Outline: {len(chapters)} chapters")
+
+    # Assemble body deterministically — body content is byte-identical
+    # to the raw page extraction, just grouped under chapter headings.
+    yaml_block = _build_long_doc_yaml(fm, file_id, filename)
+    title = fm.get("title", "")
+    parts = [yaml_block, "", f"# {title}", ""]
+    used_pages: set[int] = set()
+    for ch in chapters:
+        heading = (ch.get("heading") or "").strip()
+        try:
+            start = int(ch.get("start_page", 1))
+            end = int(ch.get("end_page", page_count))
+        except (TypeError, ValueError):
+            continue
+        start = max(1, min(start, page_count))
+        end = max(start, min(end, page_count))
+        slice_pages = raw_pages[start - 1:end]
+        used_pages.update(range(start, end + 1))
+        parts.append(f"## {heading}")
+        parts.append("")
+        parts.append("\n\n".join(slice_pages))
+        parts.append("")
+
+    # Safety net: if the outline missed any pages, append them under ภาคผนวก เพิ่มเติม
+    missing = sorted(set(range(1, page_count + 1)) - used_pages)
+    if missing:
+        logger.warning(f"  Long-doc outline missed pages: {missing} — appending")
+        parts.append("## ภาคผนวก หน้าที่ไม่ได้จัดเข้าบท")
+        parts.append("")
+        for p in missing:
+            parts.append(raw_pages[p - 1])
+            parts.append("")
+
+    return "\n".join(parts)
+
+
 def extract(
     pdf_bytes: bytes,
     file_id: str,
@@ -715,11 +966,27 @@ def extract(
         logger.info(f"  Per-page Pro extraction: {page_count} pages @ 300 DPI, delay={page_delay}s (us-central1)")
 
         # Intermediate save: persist raw pages so far to disk after each page.
+        # On retry, load existing cache and resume from the first missing page.
         raw_cache = OCR_CACHE_DIR / f"{hashlib.sha256(file_id.encode()).hexdigest()[:16]}_raw.json"
-        ocr_client = _ocr_client()
         raw_pages = []
+        start_page = 0  # 0-based index into page_images
+        if raw_cache.exists():
+            try:
+                cached = json.loads(raw_cache.read_text(encoding="utf-8"))
+                if isinstance(cached, list) and cached:
+                    raw_pages = cached
+                    start_page = len(cached)
+                    if start_page >= page_count:
+                        logger.info(f"  Raw cache complete ({page_count} pages) — skipping re-extraction")
+                    else:
+                        logger.info(f"  Resuming from page {start_page + 1}/{page_count} (cache had {start_page} pages)")
+            except Exception:
+                raw_pages = []
+                start_page = 0
 
-        for i, png_bytes in enumerate(page_images, 1):
+        ocr_client = _ocr_client()
+
+        for i, png_bytes in enumerate(page_images[start_page:], start_page + 1):
             logger.info(f"    Page {i}/{page_count} ({len(png_bytes)//1024} KB)")
             page_prompt = _EXTRACT_PAGE_RAW_PROMPT_TEMPLATE.format(
                 page_num=i, total_pages=page_count,
@@ -752,19 +1019,51 @@ def extract(
                 time.sleep(page_delay)
 
         raw_text = "\n\n".join(raw_pages)
-        prompt = _STRUCTURE_FROM_RAW_PROMPT_TEMPLATE.format(
-            filename=filename,
-            schema_fields=schema_fields,
-            section_template=section_template,
-            file_id=file_id,
-            page_count=page_count,
-            raw_text=raw_text,
-        )
-        response = client.models.generate_content_stream(
-            model=OCR_EXTRACT_MODEL,
-            contents=[prompt],
-            config=genai_types.GenerateContentConfig(),
-        )
+
+        # Guard against token limit (65,536 input tokens on Vertex AI).
+        # Thai text ≈ 2.4 chars/token; 150K chars ≈ 62K tokens, leaving headroom for template.
+        _MAX_STRUCTURE_CHARS = 150_000
+        if len(raw_text) > _MAX_STRUCTURE_CHARS:
+            # Trim at the last complete page boundary within the limit.
+            trimmed = raw_text[:_MAX_STRUCTURE_CHARS]
+            last_page_marker = trimmed.rfind("\n\n<!-- Page ")
+            if last_page_marker > 0:
+                trimmed = trimmed[:last_page_marker]
+            raw_text = trimmed + "\n\n[... ส่วนที่เหลือถูกตัด เกินขีดจำกัด input token ...]"
+            logger.warning(
+                f"  Raw text truncated: {len('\n\n'.join(raw_pages)):,} → {len(raw_text):,} chars "
+                f"(page limit exceeded)"
+            )
+
+        if page_count > LONG_DOC_PAGE_THRESHOLD:
+            # Long-doc path: small Pro call for outline only, body assembled
+            # in Python from raw_pages. Avoids the streaming/timeout failure
+            # mode of asking Pro to verbatim-copy 70+ pages in one call.
+            text = _structure_long_doc(
+                raw_pages=raw_pages,
+                file_id=file_id,
+                filename=filename,
+                doc_type=doc_type,
+                ocr_client=ocr_client,
+            )
+        else:
+            prompt = _STRUCTURE_FROM_RAW_PROMPT_TEMPLATE.format(
+                filename=filename,
+                schema_fields=schema_fields,
+                section_template=section_template,
+                file_id=file_id,
+                page_count=page_count,
+                raw_text=raw_text,
+            )
+            response = client.models.generate_content_stream(
+                model=OCR_EXTRACT_MODEL,
+                contents=[prompt],
+                config=genai_types.GenerateContentConfig(),
+            )
+            text = ""
+            for chunk in response:
+                if chunk.text:
+                    text += chunk.text
     else:
         # --- Original single-call path (also uses us-central1) ---
         prompt = _EXTRACT_PROMPT_TEMPLATE.format(
@@ -780,11 +1079,10 @@ def extract(
             contents=[prompt, part],
             config=genai_types.GenerateContentConfig(),
         )
-
-    text = ""
-    for chunk in response:
-        if chunk.text:
-            text += chunk.text
+        text = ""
+        for chunk in response:
+            if chunk.text:
+                text += chunk.text
 
     # Strip code fences if Gemini added them
     text = text.strip()

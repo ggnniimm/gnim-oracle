@@ -5,6 +5,7 @@ Default timeout on ALL calls to prevent silent hangs.
 import time
 import random
 import logging
+import httpx
 from google import genai
 
 from src.config import (
@@ -60,19 +61,26 @@ def get_client() -> genai.Client:
     )
 
 
-def get_ocr_client() -> genai.Client:
+def get_ocr_client(timeout_ms: int = DEFAULT_TIMEOUT_MS) -> genai.Client:
     """Return a Gemini client pinned to OCR_LOCATION (us-central1).
 
     OCR extraction uses a separate Vertex AI location from the embedding client
     (which must be on 'global' for gemini-embedding-2). This gives OCR its own
     Pro quota pool and avoids quota cross-contamination.
+
+    Pass a larger timeout_ms for non-streaming structure calls on large docs —
+    the model may take several minutes to generate a full structured output for
+    70+ page documents. We pass a custom httpx client because the SDK's
+    http_options["timeout"] is not propagated to the underlying httpx layer.
     """
     if USE_VERTEX_AI:
+        timeout_s = timeout_ms / 1000
+        custom_httpx = httpx.Client(timeout=httpx.Timeout(timeout_s))
         return genai.Client(
             vertexai=True,
             project=GOOGLE_CLOUD_PROJECT,
             location=OCR_LOCATION,
-            http_options={"timeout": DEFAULT_TIMEOUT_MS},
+            http_options={"timeout": timeout_ms, "httpx_client": custom_httpx},
         )
     return get_client()  # AI Studio: location doesn't apply
 
