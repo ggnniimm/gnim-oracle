@@ -418,6 +418,19 @@ def _pdf_pages_to_images(pdf_bytes: bytes, dpi: int = 300) -> list[bytes]:
     return images
 
 
+def _pdf_page_to_image(pdf_bytes: bytes, page_idx: int, dpi: int = 300) -> bytes:
+    """Render a single PDF page (0-indexed) to PNG bytes at the given DPI."""
+    import fitz
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    try:
+        zoom = dpi / 72
+        mat = fitz.Matrix(zoom, zoom)
+        pix = doc[page_idx].get_pixmap(matrix=mat, colorspace=fitz.csRGB)
+        return pix.tobytes("png")
+    finally:
+        doc.close()
+
+
 
 def _cache_path(file_id: str) -> Path:
     h = hashlib.sha256(file_id.encode()).hexdigest()[:16]
@@ -993,24 +1006,47 @@ def extract(
             )
             img_part = genai_types.Part.from_bytes(data=png_bytes, mime_type="image/png")
 
-            try:
-                with ThreadPoolExecutor(max_workers=1) as ex:
-                    future = ex.submit(
-                        ocr_client.models.generate_content,
-                        model=OCR_EXTRACT_MODEL,
-                        contents=[page_prompt, img_part],
-                    )
-                    resp = future.result(timeout=_PAGE_CALL_TIMEOUT)
-                page_text = (resp.text or "").strip()
-                if page_text and page_text != "---BLANK---":
-                    raw_pages.append(f"<!-- Page {i} -->\n{page_text}")
-                    logger.info(f"    Page {i} ✓ {len(page_text):,} chars")
-            except FutureTimeoutError:
-                logger.warning(f"    Page {i} timed out after {_PAGE_CALL_TIMEOUT}s — placeholder")
-                raw_pages.append(f"<!-- Page {i} -->\n[หน้า {i}: timeout]")
-            except Exception as e:
-                logger.warning(f"    Page {i} failed: {e} — placeholder")
-                raw_pages.append(f"<!-- Page {i} -->\n[หน้า {i}: extraction failed — {e}]")
+            # Try 300 DPI first; on timeout/error, fall back to 200 DPI once.
+            # Empirically (2026-05-12 batch 4 retry) every page that timed out
+            # at 300 DPI recovered cleanly at 200 DPI — the smaller upload
+            # finishes inside the per-call window.
+            page_text = None
+            err = None
+            for attempt_dpi in (300, 200):
+                attempt_bytes = png_bytes if attempt_dpi == 300 else _pdf_page_to_image(
+                    pdf_bytes, i - 1, dpi=200,
+                )
+                attempt_part = (
+                    img_part if attempt_dpi == 300
+                    else genai_types.Part.from_bytes(data=attempt_bytes, mime_type="image/png")
+                )
+                try:
+                    with ThreadPoolExecutor(max_workers=1) as ex:
+                        future = ex.submit(
+                            ocr_client.models.generate_content,
+                            model=OCR_EXTRACT_MODEL,
+                            contents=[page_prompt, attempt_part],
+                        )
+                        resp = future.result(timeout=_PAGE_CALL_TIMEOUT)
+                    page_text = (resp.text or "").strip()
+                    if attempt_dpi != 300:
+                        logger.info(f"    Page {i} recovered at 200 DPI")
+                    break
+                except FutureTimeoutError as e:
+                    err = f"timeout after {_PAGE_CALL_TIMEOUT}s"
+                    logger.warning(f"    Page {i} timed out at {attempt_dpi} DPI")
+                except Exception as e:
+                    err = str(e)
+                    logger.warning(f"    Page {i} failed at {attempt_dpi} DPI: {e}")
+
+            if page_text is None:
+                raw_pages.append(f"<!-- Page {i} -->\n[หน้า {i}: extraction failed — {err}]")
+            elif page_text == "---BLANK---":
+                raw_pages.append(f"<!-- Page {i} -->\n")
+                logger.info(f"    Page {i} ✓ blank")
+            else:
+                raw_pages.append(f"<!-- Page {i} -->\n{page_text}")
+                logger.info(f"    Page {i} ✓ {len(page_text):,} chars")
 
             # Persist progress after every page
             raw_cache.write_text(json.dumps(raw_pages, ensure_ascii=False), encoding="utf-8")
