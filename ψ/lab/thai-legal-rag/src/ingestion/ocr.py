@@ -740,7 +740,7 @@ def _normalize_tables(text: str) -> str:
     return _TABLE_DASH_RE.sub("----", text)
 
 
-LONG_DOC_PAGE_THRESHOLD = 20
+LONG_DOC_PAGE_THRESHOLD = 10
 
 _LONG_DOC_OUTLINE_PROMPT_TEMPLATE = """\
 You are an expert structurer of Thai legal documents.
