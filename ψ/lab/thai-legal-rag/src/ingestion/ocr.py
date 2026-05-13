@@ -358,7 +358,8 @@ def _fix_doc_number_from_filename(text: str, filename: str) -> str:
     Cross-check doc_number's trailing number against the filename.
 
     Filename pattern: {prefix}_{กวจ}_{DOC_NUM}_{DATE}_{TITLE}.pdf
-    The second purely-numeric segment is the authoritative doc number.
+    The segment immediately after "กวจ" is the authoritative doc number.
+    Supports both purely-numeric ("12345") and ว-prefixed ("ว125") forms.
 
     If OCR misread the handwritten number, replace it with the correct one.
     """
@@ -366,13 +367,18 @@ def _fix_doc_number_from_filename(text: str, filename: str) -> str:
 
     stem = Path(filename).stem  # strip .pdf
     parts = stem.split("_")
-    # Doc number is the purely-numeric segment immediately after the segment containing "กวจ"
     filename_num = None
+    v_type = False  # True when filename uses ว<NNN> circular-number format
     for i, part in enumerate(parts):
         if "กวจ" in part and i + 1 < len(parts):
             candidate = parts[i + 1]
             if candidate.isdigit():
                 filename_num = candidate
+                break
+            m = re.match(r"^ว(\d+)$", candidate)
+            if m:
+                filename_num = m.group(1)
+                v_type = True
                 break
     if not filename_num:
         return text
@@ -382,14 +388,29 @@ def _fix_doc_number_from_filename(text: str, filename: str) -> str:
         value = m.group(1)
         if "/" in value:
             prefix_part, num_part = value.rsplit("/", 1)
-            # Convert Thai numerals → Arabic for comparison
-            num_arabic = num_part.strip().translate(_THAI_TO_ARABIC)
-            if num_arabic != filename_num:
-                logger.info(
-                    f"doc_number mismatch: OCR={num_arabic!r} filename={filename_num!r} — correcting"
-                )
-                thai_num = filename_num.translate(_ARABIC_TO_THAI)
-                return f'doc_number: "{prefix_part}/{thai_num}"'
+            stripped = num_part.strip()
+            if v_type:
+                # Only match ว-type doc_numbers (e.g. "ว ๑๒๕").
+                # If the doc_number ends with a plain serial (e.g. "๖๖๔๗"), the
+                # filename ว<NNN> is organisational shorthand — don't touch it.
+                v_match = re.match(r"^ว\s*([๐-๙]+)$", stripped)
+                if not v_match:
+                    return m.group(0)
+                num_arabic = v_match.group(1).translate(_THAI_TO_ARABIC)
+                if num_arabic != filename_num:
+                    logger.info(
+                        f"doc_number mismatch: OCR=ว{num_arabic!r} filename=ว{filename_num!r} — correcting"
+                    )
+                    thai_num = filename_num.translate(_ARABIC_TO_THAI)
+                    return f'doc_number: "{prefix_part}/ว {thai_num}"'
+            else:
+                num_arabic = stripped.translate(_THAI_TO_ARABIC)
+                if num_arabic != filename_num:
+                    logger.info(
+                        f"doc_number mismatch: OCR={num_arabic!r} filename={filename_num!r} — correcting"
+                    )
+                    thai_num = filename_num.translate(_ARABIC_TO_THAI)
+                    return f'doc_number: "{prefix_part}/{thai_num}"'
         return m.group(0)
 
     return re.sub(r'doc_number:\s*"([^"]+)"', fix_match, text)
