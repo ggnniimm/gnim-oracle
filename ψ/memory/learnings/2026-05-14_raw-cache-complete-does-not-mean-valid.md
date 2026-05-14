@@ -29,4 +29,18 @@ Placeholder entries are tiny (50–100 chars) and contain "extraction failed".
 
 **Why:** Discovered during ว119 corpus cleanup (2026-05-14). Page 6 timed out in an old run, was cached as placeholder. Two subsequent retries silently reused the placeholder because cache looked "complete". Root cause found only by reading JSON directly.
 
-**How to apply:** When OCR retry produces quality:review-needed with a missing-page note, check the raw cache before assuming it's a model or network problem. The cache itself may be the issue.
+**The damage is worse than missing content — Pro hallucinates.** Audited all 75 raw caches the same day and found ว1489 (`cc210728719b5967_raw.json`) had a page-1 placeholder. The previous structuring run on 05-14 10:49 produced a `quality: good` MD anyway, with content that *looked* fine. After re-OCR with cache cleared, diffing old vs new revealed Pro had **fabricated specific document references** when page 1 was missing:
+
+| Old MD (poisoned) | New MD (correct) |
+|---|---|
+| อ้างถึง "ว ๘๙๕ ลงวันที่ ๑๐ พ.ย. ๒๕๖๓" | อ้างถึง "คำวินิจฉัยกฤษฎีกา เรื่องเสร็จที่ ๑๓๙๗/๒๕๖๓" |
+| หนังสือ "ด่วนที่สุด ที่ นร ๐๙๐๑/๑๕๗๗ ลว. ๑๔ พ.ย. ๒๕๖๕" | (no such reference exists in the doc) |
+| พ.ร.บ.วิธีการงบประมาณ **พ.ศ. ๒๕๐๒** | พ.ร.บ.วิธีการงบประมาณ **พ.ศ. ๒๕๖๑** |
+| 5 entries in `laws_referenced` | 10 entries (incl. มาตรา ๒๙ วรรคหนึ่ง (๓) และ (๔)) |
+
+Pro invented plausible-looking citation numbers, dates, and the wrong law version. Because they look real, downstream LLM and human reviewers can't catch them. `quality: good` was assigned because the structuring pass succeeded — not because the content was accurate. **This is silent corpus poisoning.**
+
+**How to apply:**
+- When OCR retry produces `quality:review-needed` with a missing-page note, inspect the raw cache before blaming the model or network.
+- After every long-doc OCR session, audit `data/ocr_cache/*_raw.json` for `"extraction failed"` or `"timed out"` strings before trusting the MDs they produced.
+- Treat `quality: good` from per-page Pro pipelines as a process flag, not a content guarantee — if the underlying raw cache had a placeholder, the MD's specific citations/dates/law-versions are suspect.
