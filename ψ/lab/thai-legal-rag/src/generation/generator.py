@@ -5,11 +5,32 @@ Uses Gemini Flash + นิติกรชำนาญการพิเศษ sy
 from __future__ import annotations
 
 import logging
+import os
+import re
 
 from google.genai import types as genai_types
 
-from src.config import GEMINI_FLASH_MODEL
+from src.config import GEMINI_FLASH_MODEL, GEMINI_PRO_MODEL
 from src.gemini_client import get_client, generate_with_retry
+
+# If GENERATOR_MODEL is set, force that model for every query (experiments/rollback).
+# Unset → smart routing: Pro for date-calc, Flash for the rest.
+_FORCED_MODEL = os.getenv("GENERATOR_MODEL") or None
+
+_THAI_MONTH_RE = re.compile(
+    r"(?:มกราคม|กุมภาพันธ์|มีนาคม|เมษายน|พฤษภาคม|มิถุนายน|"
+    r"กรกฎาคม|สิงหาคม|กันยายน|ตุลาคม|พฤศจิกายน|ธันวาคม)"
+)
+
+
+def _is_date_calc_query(q: str) -> bool:
+    return "ค่าปรับ" in q and bool(_THAI_MONTH_RE.search(q))
+
+
+def _pick_model(q: str) -> str:
+    if _FORCED_MODEL:
+        return _FORCED_MODEL
+    return GEMINI_PRO_MODEL if _is_date_calc_query(q) else GEMINI_FLASH_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -168,10 +189,13 @@ def generate_answer(
     else:
         contents = user_prompt
 
+    model = _pick_model(question)
+    logger.info(f"Generator: {model}")
+
     try:
         response = generate_with_retry(
             client,
-            model=GEMINI_FLASH_MODEL,
+            model=model,
             contents=contents,
             config=genai_types.GenerateContentConfig(
                 system_instruction=_SYSTEM_PROMPT,
@@ -205,6 +229,6 @@ def generate_answer(
     return {
         "answer": answer,
         "sources": sources,
-        "model": GEMINI_FLASH_MODEL,
+        "model": model,
         "chunks_used": len(chunks),
     }

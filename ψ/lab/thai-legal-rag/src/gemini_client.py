@@ -32,6 +32,7 @@ _FINAL_ROUND_COOLDOWN = 20  # seconds — wait after full chain fails once befor
 # Different aliases often route to different backend capacity pools,
 # so cycling through them gives a better shot at finding a healthy one.
 _FALLBACK_MODELS = [
+    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
     "gemini-flash-latest",
 ]
