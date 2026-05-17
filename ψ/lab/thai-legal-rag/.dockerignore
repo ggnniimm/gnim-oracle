@@ -1,6 +1,7 @@
 data/
 data_with_ac/
 eval/
+pipeline/
 prod-snapshot/
 ψ/
 tests/

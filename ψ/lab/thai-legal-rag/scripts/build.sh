@@ -13,7 +13,7 @@ TIMESTAMP=$(date +%Y%m%d-%H%M)
 VERSION_TAG="${APP_NAME}:v${TIMESTAMP}-${GIT_SHA}"
 
 echo "==> Building image: $VERSION_TAG"
-docker build -t "$VERSION_TAG" -t "${APP_NAME}:latest" "$@" .
+docker build --platform linux/amd64 -t "$VERSION_TAG" -t "${APP_NAME}:latest" "$@" .
 echo ""
 echo "==> Build complete."
 echo "    Version tag: $VERSION_TAG"
