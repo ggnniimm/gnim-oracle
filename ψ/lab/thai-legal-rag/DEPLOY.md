@@ -23,23 +23,42 @@
 
 ## Code Deploy (image เปลี่ยน)
 
-ใช้เมื่อ: แก้ `src/`, `app/`, `pipeline/`, `requirements.txt`
+ใช้เมื่อ: แก้ `src/`, `app/`, `requirements.txt`, `Dockerfile`
+
+### วิธี A: GitHub Actions (recommended)
 
 ```bash
-# 1. Build + tag
+# 1. Commit + push → CI build อัตโนมัติ (~5 นาที)
+git push origin main
+
+# 2. ดู CI progress
+gh run list -R ggnniimm/gnim-oracle --workflow=build-image.yml
+
+# 3. Deploy ผ่าน GitHub Actions (manual trigger)
+gh workflow run deploy-image.yml -R ggnniimm/gnim-oracle -f image_tag=latest
+# หรือไปที่ https://github.com/ggnniimm/gnim-oracle/actions/workflows/deploy-image.yml → Run workflow
+```
+
+### วิธี B: Local build + deploy (fallback / ไม่มี internet CI)
+
+```bash
+# 1. Build + push to ghcr.io
+bash scripts/build.sh --push
+# จะ print: REMOTE_TAG=ghcr.io/ggnniimm/thai-legal-rag-app:local-20260517-1205-3c0f72a
+
+# 2. Deploy via registry pull (fast)
+bash scripts/deploy_image.sh ghcr.io/ggnniimm/thai-legal-rag-app:local-20260517-1205-3c0f72a
+
+# 3. Log
+echo "$(date '+%Y-%m-%d %H:%M') deploy_image local $REMOTE_TAG" >> DEPLOY_LOG.md
+```
+
+### วิธี C: Local build + scp (ไม่มี registry)
+
+```bash
 bash scripts/build.sh
-# จะ print: VERSION_TAG=thai-legal-rag-app:v20260517-1205-3c0f72a
-
-# 2. (optional) Run local smoke test
-docker compose up -d app
-curl http://localhost:8501/healthz
-
-# 3. Deploy to prod
-bash scripts/deploy_image.sh thai-legal-rag-app:v20260517-1205-3c0f72a
-# Script: docker save → scp → docker load → docker compose up -d app → smoke test
-
-# 4. Log the deploy
-echo "$(date '+%Y-%m-%d %H:%M') deploy_image $VERSION_TAG" >> DEPLOY_LOG.md
+bash scripts/deploy_image.sh --local thai-legal-rag-app:local-20260517-1205-3c0f72a
+# ⚠️ ช้า (~15 นาที, 3GB transfer)
 ```
 
 ---
@@ -128,22 +147,35 @@ Latest local snapshot: `data/snapshots/thai_legal_rag-336578599102351-2026-05-17
 
 ---
 
+## Drift Check (รัน start of session / ก่อน reindex)
+
+```bash
+bash scripts/drift_check.sh
+# PASS = prod code ตรงกับ local
+# DRIFT = มีไฟล์ที่ prod ต่างจาก local → deploy image ใหม่
+```
+
+---
+
 ## Monitoring
 
 ```bash
 # Prod logs
 ssh root@31.97.188.155 'docker logs thai-legal-rag-app-1 --tail 50 -f'
 
-# Prod Qdrant chunk count
-ssh root@31.97.188.155 "curl -s 'http://localhost:6333/collections/thai_legal_rag'" | \
-  python3 -c "import json,sys; print(json.load(sys.stdin)['result']['points_count'])"
+# Prod smoke test (external + Qdrant chunk count)
+bash scripts/prod_smoke.sh
 
-# Prod app health
-curl -s https://mwaprocure.gnim.cloud/healthz
+# Prod Qdrant chunk count
+ssh root@31.97.188.155 "docker exec thai-legal-rag-app-1 python3 -c \"
+import urllib.request, json
+r = urllib.request.urlopen('http://qdrant:6333/collections/thai_legal_rag')
+print(json.load(r)['result']['points_count'])
+\""
 ```
 
 ---
 
 ## Emergency (อย่าใช้ถ้าไม่จำเป็น)
 
-ถ้า prod พังและต้องแก้ urgent — ดู `EMERGENCY.md` (Phase 3)
+ถ้า prod พังและต้องแก้ urgent — ดู `EMERGENCY.md`
