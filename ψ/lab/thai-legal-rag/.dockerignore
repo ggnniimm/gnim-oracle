@@ -1,12 +1,12 @@
 data/
 data_with_ac/
-app/auth_config.yaml
+eval/
+prod-snapshot/
+ψ/
+tests/
+scripts/
 __pycache__/
 **/__pycache__/
 *.pyc
 .env
 .git/
-eval/
-pipeline/
-tests/
-ψ/

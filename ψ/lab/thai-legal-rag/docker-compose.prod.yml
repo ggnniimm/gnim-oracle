@@ -1,0 +1,44 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.17.1
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - internal
+
+  app:
+    image: thai-legal-rag-app:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8501:8501"
+    env_file:
+      - .env
+    environment:
+      - THAI_RAG_DATA_DIR=/app/data
+      - QDRANT_URL=http://qdrant:6333
+    volumes:
+      - ./data:/app/data
+      - ./data/auth_config.yaml:/app/app/auth_config.yaml
+      - ./credentials:/app/credentials:ro
+    depends_on:
+      - qdrant
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.mwaprocure.rule=Host(`mwaprocure.gnim.cloud`)
+      - traefik.http.routers.mwaprocure.entrypoints=websecure
+      - traefik.http.routers.mwaprocure.tls=true
+      - traefik.http.routers.mwaprocure.tls.certresolver=mytlschallenge
+      - traefik.http.services.mwaprocure.loadbalancer.server.port=8501
+    networks:
+      - traefik_proxy
+      - internal
+
+volumes:
+  qdrant_data:
+
+networks:
+  traefik_proxy:
+    external: true
+  internal:
+    driver: bridge
