@@ -3,3 +3,4 @@ data/
 *.pyc
 __pycache__/
 eval/golden_test_cases.candidates.json
+prod-snapshot/
