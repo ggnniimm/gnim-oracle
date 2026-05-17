@@ -1,0 +1,55 @@
+name: Deploy to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: "Image tag to deploy (e.g. sha-abc1234 or latest)"
+        required: false
+        default: "latest"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ggnniimm/thai-legal-rag-app
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: root
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          known_hosts: ${{ secrets.SSH_KNOWN_HOSTS }}
+          script: |
+            set -euo pipefail
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}"
+            COMPOSE_DIR="/app/thai-legal-rag"
+
+            echo "==> Pulling image: $IMAGE"
+            docker pull "$IMAGE"
+
+            echo "==> Tagging as local latest ..."
+            docker tag "$IMAGE" thai-legal-rag-app:latest
+
+            echo "==> Restarting app ..."
+            cd "$COMPOSE_DIR"
+            docker compose up -d app
+
+            echo "==> Waiting for app to start ..."
+            sleep 10
+
+            echo "==> Smoke test ..."
+            HTTP_STATUS=$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8501/healthz || echo "000")
+            echo "    Health check: HTTP $HTTP_STATUS"
+
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "    PASS — $IMAGE deployed to prod"
+            else
+              echo "    WARNING — HTTP $HTTP_STATUS"
+              docker logs thai-legal-rag-app-1 --tail 30
+              exit 1
+            fi
