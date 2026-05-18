@@ -9,8 +9,6 @@ Usage:
     python index_md_folder.py --dir data/md_backup --force-reindex --file doc_X.md
 """
 import argparse
-import hashlib
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -19,9 +17,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from tqdm import tqdm
 
 from src.ingestion.md_loader import load_md_file, _parse_frontmatter
-from src.ingestion.dedup import is_indexed, mark_indexed, stats as dedup_stats
+from src.ingestion.dedup import is_indexed, mark_indexed, delete_by_source_id, stats as dedup_stats
 from src.indexing.manager import IndexManager
-from src.config import DEDUP_DB
 
 _THAI_DIGIT_MAP = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 
@@ -48,19 +45,6 @@ def _metadata_prefix(meta: dict) -> str:
         return ""
     return "[" + " | ".join(parts) + "]\n\n"
 
-
-def _delete_dedup_entries(enriched_texts: list[str]) -> int:
-    """Delete dedup DB entries for the given enriched texts. Returns count deleted."""
-    hashes = [hashlib.sha256(t.encode("utf-8")).hexdigest() for t in enriched_texts]
-    con = sqlite3.connect(DEDUP_DB)
-    cur = con.execute(
-        f"DELETE FROM indexed_chunks WHERE hash IN ({','.join('?' * len(hashes))})",
-        hashes,
-    )
-    count = cur.rowcount
-    con.commit()
-    con.close()
-    return count
 
 
 def parse_args():
@@ -131,13 +115,10 @@ def main():
             n_vec = vector_store.delete_by_source_name(source_name)
             print(f"  [{md_file.name}] Deleted {n_vec} vectors (source_name={source_name!r})")
 
-            # 2. Delete from dedup DB
-            enriched_texts = []
-            for chunk in chunks:
-                prefix = _metadata_prefix(chunk.metadata)
-                enriched_texts.append(prefix + chunk.text if prefix else chunk.text)
-            n_dedup = _delete_dedup_entries(enriched_texts)
-            print(f"  [{md_file.name}] Deleted {n_dedup} dedup entries")
+            # 2. Delete from dedup DB by source_id (file_id) — covers old and new hashes
+            source_id = (chunks[0].metadata.get("file_id") if chunks else None) or md_file.stem
+            n_dedup = delete_by_source_id(source_id)
+            print(f"  [{md_file.name}] Deleted {n_dedup} dedup entries (source_id={source_id!r})")
 
     # --- normal indexing loop ---
     total_new = 0

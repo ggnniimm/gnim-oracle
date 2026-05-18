@@ -48,6 +48,16 @@ def mark_indexed(text: str, source_id: str) -> None:
     con.close()
 
 
+def delete_by_source_id(source_id: str) -> int:
+    """Delete all dedup entries for a given source_id. Returns count deleted."""
+    con = _conn()
+    cur = con.execute("DELETE FROM indexed_chunks WHERE source_id = ?", (source_id,))
+    count = cur.rowcount
+    con.commit()
+    con.close()
+    return count
+
+
 def stats() -> dict:
     con = _conn()
     total = con.execute("SELECT COUNT(*) FROM indexed_chunks").fetchone()[0]
