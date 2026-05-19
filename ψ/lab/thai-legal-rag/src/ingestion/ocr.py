@@ -1020,6 +1020,45 @@ def extract(
 
         ocr_client = _ocr_client()
 
+        # Retry previously failed pages before processing new ones
+        failed_indices = [idx for idx, p in enumerate(raw_pages) if "extraction failed" in p]
+        if failed_indices:
+            logger.info(f"  Retrying {len(failed_indices)} previously failed pages: {[i+1 for i in failed_indices]}")
+            for idx in failed_indices:
+                i = idx + 1
+                png_bytes = page_images[idx]
+                page_prompt = _EXTRACT_PAGE_RAW_PROMPT_TEMPLATE.format(page_num=i, total_pages=page_count)
+                page_text = None
+                err = None
+                for attempt_dpi in (300, 200):
+                    attempt_bytes = png_bytes if attempt_dpi == 300 else _pdf_page_to_image(pdf_bytes, idx, dpi=200)
+                    attempt_part = genai_types.Part.from_bytes(data=attempt_bytes, mime_type="image/png")
+                    try:
+                        with ThreadPoolExecutor(max_workers=1) as ex:
+                            future = ex.submit(ocr_client.models.generate_content, model=OCR_EXTRACT_MODEL, contents=[page_prompt, attempt_part])
+                            resp = future.result(timeout=_PAGE_CALL_TIMEOUT)
+                        page_text = (resp.text or "").strip()
+                        if attempt_dpi != 300:
+                            logger.info(f"    Page {i} retry recovered at 200 DPI")
+                        break
+                    except FutureTimeoutError:
+                        err = f"timeout after {_PAGE_CALL_TIMEOUT}s"
+                        logger.warning(f"    Page {i} retry timed out at {attempt_dpi} DPI")
+                    except Exception as e:
+                        err = str(e)
+                        logger.warning(f"    Page {i} retry failed at {attempt_dpi} DPI: {e}")
+                if page_text is None:
+                    logger.warning(f"    Page {i} still failed after retry — keeping placeholder")
+                elif page_text == "---BLANK---":
+                    raw_pages[idx] = f"<!-- Page {i} -->\n"
+                    logger.info(f"    Page {i} retry ✓ blank")
+                else:
+                    raw_pages[idx] = f"<!-- Page {i} -->\n{page_text}"
+                    logger.info(f"    Page {i} retry ✓ {len(page_text):,} chars")
+                raw_cache.write_text(json.dumps(raw_pages, ensure_ascii=False), encoding="utf-8")
+                if page_delay > 0:
+                    time.sleep(page_delay)
+
         for i, png_bytes in enumerate(page_images[start_page:], start_page + 1):
             logger.info(f"    Page {i}/{page_count} ({len(png_bytes)//1024} KB)")
             page_prompt = _EXTRACT_PAGE_RAW_PROMPT_TEMPLATE.format(
