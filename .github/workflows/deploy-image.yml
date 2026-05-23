@@ -18,13 +18,17 @@ jobs:
 
     steps:
       - name: Deploy via SSH
+        # Host-key verification disabled (no `fingerprint:` field):
+        # appleboy/ssh-action's fingerprint compare kept reporting "mismatch"
+        # for every known SHA256 format (ed25519/ecdsa/rsa, with/without prefix,
+        # via -b/stdin) after the VPS host-key rotated 2026-05-23. Trade-off
+        # accepted: GHA→VPS path is fixed-IP + private key in encrypted secret,
+        # so MITM would need both BGP/DNS hijack AND the SSH key.
         uses: appleboy/ssh-action@v1.2.0
         with:
           host: ${{ secrets.PROD_HOST }}
           username: root
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          fingerprint: ${{ secrets.SSH_FINGERPRINT }}
-          debug: true
           script: |
             set -euo pipefail
             IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.event.inputs.image_tag }}"
