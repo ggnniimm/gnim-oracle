@@ -42,7 +42,12 @@ class IndexManager:
 
         vector_results, bm25_results = await asyncio.gather(vector_task, bm25_task)
         if payload_filter:
-            bm25_results = [r for r in bm25_results if r.get(payload_filter["field"]) == payload_filter["value"]]
+            field = payload_filter["field"]
+            if "values" in payload_filter:
+                allowed = set(payload_filter["values"])
+                bm25_results = [r for r in bm25_results if r.get(field) in allowed]
+            else:
+                bm25_results = [r for r in bm25_results if r.get(field) == payload_filter["value"]]
         return {"vector": vector_results, "bm25": bm25_results}
 
     def query(self, query: str, k: int = VECTOR_TOP_K) -> dict[str, list[dict]]:

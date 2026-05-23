@@ -17,6 +17,21 @@ logger = logging.getLogger(__name__)
 _JUDGMENT_KEYWORDS = re.compile(r"คำพิพากษา|คำสั่งศาล|ศาลปกครอง|คดีปกครอง")
 _ATTORNEY_KEYWORDS = re.compile(r"อัยการสูงสุด|สำนักงานอัยการ|คำวินิจฉัยอัยการ|อัยการ(?:สูงสุด|จังหวัด|พิเศษ)")
 
+# Statute carve-out: when a "specific" query targets a statutory provision
+# (มาตรา/ข้อ/หมวด/วรรค/ม.X), BM25 alone buries the statute chunk under
+# doc-ID/material-code noise. Run an additional vector search filtered to
+# the statute file_ids so the section text surfaces.
+_STATUTE_PROVISION_PATTERN = re.compile(
+    r"มาตรา\s*[\d๐-๙]+|ข้อ\s*[\d๐-๙]+|หมวด\s*[\d๐-๙]+"
+    r"|วรรค\s*(?:หนึ่ง|สอง|สาม|สี่|ห้า|\d+)"
+    r"|ม\.\s*\d+"
+)
+STATUTE_FILE_IDS = [
+    "1raRAyQai8gybh1jaHaoHCSF-E797gISF",  # พ.ร.บ.จัดซื้อจัดจ้างและการบริหารพัสดุภาครัฐ 2560
+    "1bGmZda4_AEDx8jc4VWsnq15hQWpA66IV",  # ระเบียบกระทรวงการคลังว่าด้วยการจัดซื้อจัดจ้างฯ 2560
+]
+_STATUTE_VECTOR_K = 10
+
 
 def _detect_payload_filter(query: str, history: list[dict] | None = None) -> dict | None:
     """Return {field, value} payload filter if query targets a specific source type."""
@@ -99,7 +114,24 @@ class Retriever:
                     merged_bm25[key] = item
 
         if specific:
-            # For ID/provision lookups, BM25 exact match is authoritative.
+            # Statute carve-out: for มาตรา/ข้อ/หมวด/วรรค/ม.X queries, BM25 alone
+            # buries the statute chunk under doc-ID/material-code noise (e.g.
+            # "ม. 103 รื้อกอง" in material-code circulars outranks มาตรา ๑๐๓).
+            # Run an additional vector search filtered to statute file_ids so
+            # the section text surfaces.
+            if _STATUTE_PROVISION_PATTERN.search(query):
+                logger.debug(f"Statute carve-out: filtered vector search on statute file_ids")
+                loop = asyncio.get_event_loop()
+                statute_hits = await loop.run_in_executor(
+                    None,
+                    lambda: self.index.vector.search(
+                        query,
+                        k=_STATUTE_VECTOR_K,
+                        payload_filter={"field": "file_id", "values": STATUTE_FILE_IDS},
+                    ),
+                )
+                return {"vector": statute_hits, "bm25": list(merged_bm25.values())}
+            # Doc-ID lookup (bare 4+ digit): BM25 exact match is authoritative.
             # Vector embeddings of bare numbers return generic semantic matches that add noise.
             logger.debug(f"Specific query — returning BM25 only (skipping vector)")
             return {"vector": [], "bm25": list(merged_bm25.values())}

@@ -9,7 +9,7 @@ import uuid
 
 import numpy as np
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue, MatchAny
 
 from src.config import (
     EMBEDDING_DIM,
@@ -171,11 +171,14 @@ class QdrantStore:
         if total == 0:
             return []
         vector = _embed([query])
-        qdrant_filter = (
-            Filter(must=[FieldCondition(key=payload_filter["field"], match=MatchValue(value=payload_filter["value"]))])
-            if payload_filter
-            else None
-        )
+        if payload_filter:
+            if "values" in payload_filter:
+                match = MatchAny(any=payload_filter["values"])
+            else:
+                match = MatchValue(value=payload_filter["value"])
+            qdrant_filter = Filter(must=[FieldCondition(key=payload_filter["field"], match=match)])
+        else:
+            qdrant_filter = None
         response = self._client.query_points(
             collection_name=_COLLECTION,
             query=vector[0].tolist(),
