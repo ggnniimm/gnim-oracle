@@ -73,7 +73,12 @@ class Retriever:
         specific = is_specific_query(query)
         if expand and not specific:
             queries = expand_query(query)
-            logger.debug(f"Expanded to {len(queries)} queries")
+            # Also append glossary synonyms (covers domain-specific terms that
+            # Gemini expansion may miss, e.g. ลงนาม↔ลงลายมือชื่อ, ยกเว้น↔ผ่อนผัน).
+            gloss = glossary_expand(query)
+            if gloss:
+                queries = list(dict.fromkeys(queries + gloss[:3]))
+            logger.debug(f"Expanded to {len(queries)} queries (with glossary)")
         else:
             if expand and specific:
                 gloss = glossary_expand(query)
