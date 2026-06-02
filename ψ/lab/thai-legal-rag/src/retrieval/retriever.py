@@ -8,7 +8,7 @@ import logging
 import re
 
 from src.indexing.manager import IndexManager
-from src.retrieval.glossary import glossary_expand
+from src.retrieval.glossary import glossary_expand, vocab_expand
 from src.retrieval.query_expand import expand_query, is_specific_query
 from src.config import VECTOR_TOP_K, ORIGINAL_QUERY_BOOST
 
@@ -73,12 +73,14 @@ class Retriever:
         specific = is_specific_query(query)
         if expand and not specific:
             queries = expand_query(query)
-            # Also append glossary synonyms (covers domain-specific terms that
-            # Gemini expansion may miss, e.g. ลงนาม↔ลงลายมือชื่อ, ยกเว้น↔ผ่อนผัน).
-            gloss = glossary_expand(query)
-            if gloss:
-                queries = list(dict.fromkeys(queries + gloss[:3]))
-            logger.debug(f"Expanded to {len(queries)} queries (with glossary)")
+            # Also append vocabulary-synonym expansions (covers spelling variants
+            # Gemini may miss, e.g. ลงนาม↔ลงลายมือชื่อ, e-GP↔e - GP).
+            # Uses vocab_expand (not full glossary) to avoid semantic-expansion
+            # regressions from entries like ขยายเวลา/บอกเลิกสัญญา.
+            vocab = vocab_expand(query)
+            if vocab:
+                queries = list(dict.fromkeys(queries + vocab[:3]))
+            logger.debug(f"Expanded to {len(queries)} queries (with vocab synonyms)")
         else:
             if expand and specific:
                 gloss = glossary_expand(query)

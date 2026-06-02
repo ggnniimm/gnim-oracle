@@ -42,6 +42,20 @@ LEGAL_GLOSSARY: dict[str, list[str]] = {
 }
 
 
+# Vocabulary-level synonyms safe for ALL query types (non-specific included).
+# Only exact alternative spellings / true synonyms — no semantic expansions.
+# Semantic-heavy entries (ขยายเวลา, บอกเลิกสัญญา, etc.) live in LEGAL_GLOSSARY
+# and are applied only to specific queries (ข้อ N / มาตรา N).
+VOCAB_SYNONYMS: dict[str, list[str]] = {
+    "e-GP": ["e-GP", "e - GP", "ระบบจัดซื้อจัดจ้างภาครัฐด้วยอิเล็กทรอนิกส์"],
+    "e - GP": ["e - GP", "e-GP", "ระบบจัดซื้อจัดจ้างภาครัฐด้วยอิเล็กทรอนิกส์"],
+    "ลงนาม": ["ลงนาม", "ลงลายมือชื่อ"],
+    "ลงลายมือชื่อ": ["ลงลายมือชื่อ", "ลงนาม"],
+    "ยกเว้น": ["ยกเว้น", "ผ่อนผัน", "อนุมัติยกเว้น"],
+    "ผ่อนผัน": ["ผ่อนผัน", "ยกเว้น", "อนุมัติยกเว้น"],
+}
+
+
 def glossary_expand(query: str) -> list[str]:
     """Return glossary terms matching any key found in query. Instant, no API."""
     terms: list[str] = []
@@ -49,6 +63,20 @@ def glossary_expand(query: str) -> list[str]:
     for key, expansions in LEGAL_GLOSSARY.items():
         if key in query:
             for term in expansions:
+                if term not in seen and term not in query:
+                    seen.add(term)
+                    terms.append(term)
+    return terms
+
+
+def vocab_expand(query: str) -> list[str]:
+    """Vocabulary-synonym expansion safe for non-specific queries.
+    Uses VOCAB_SYNONYMS only — avoids semantic-expansion regressions."""
+    terms: list[str] = []
+    seen: set[str] = set()
+    for key, synonyms in VOCAB_SYNONYMS.items():
+        if key in query:
+            for term in synonyms:
                 if term not in seen and term not in query:
                     seen.add(term)
                     terms.append(term)

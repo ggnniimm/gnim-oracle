@@ -1,0 +1,65 @@
+diff --git a/ψ/lab/thai-legal-rag/src/retrieval/reranker.py b/ψ/lab/thai-legal-rag/src/retrieval/reranker.py
+index 9e7262b..d3f2955 100644
+--- a/ψ/lab/thai-legal-rag/src/retrieval/reranker.py
++++ b/ψ/lab/thai-legal-rag/src/retrieval/reranker.py
+@@ -11,6 +11,7 @@ Pipeline:
+ from __future__ import annotations
+ 
+ import logging
++import re
+ 
+ from pythainlp.tokenize import word_tokenize
+ 
+@@ -18,6 +19,31 @@ from src.config import BM25_WEIGHT, MMR_INJECT_EXTRAS, MMR_LAMBDA, RERANK_TOP_K,
+ 
+ logger = logging.getLogger(__name__)
+ 
++# Approach B (ID-query rerank boost): when the query names a หนังสือเวียน by its
++# circular number ("ว 397"), strongly boost pooled chunks of that exact circular so
++# it ranks #1. The chunk is already in the pool (BM25 nails it) but fusion with
++# hundreds of vector hits dilutes it; this boost overcomes the dilution while
++# keeping the hybrid pool intact (unlike Approach A which drops to BM25-only).
++_ID_QUERY_RE = re.compile(r"(?:^|\s)ว\s*([\d๐-๙]{1,4})\b")
++_THAI_DIGITS = "๐๑๒๓๔๕๖๗๘๙"
++ID_MATCH_BOOST = 5.0
++
++
++def _to_thai_digits(s: str) -> str:
++    return "".join(_THAI_DIGITS[int(c)] if c.isdigit() else c for c in s)
++
++
++def _id_query_markers(query: str) -> list[str]:
++    """If query names a circular ('ว 397'), return source_name/ref_number substrings
++    that identify that exact circular (both Arabic and Thai numeral forms)."""
++    m = _ID_QUERY_RE.search(query)
++    if not m:
++        return []
++    # Normalise the matched digits to Arabic, then derive the Thai-numeral form.
++    arabic = "".join(str(_THAI_DIGITS.index(c)) if c in _THAI_DIGITS else c for c in m.group(1))
++    thai = _to_thai_digits(arabic)
++    return [f"ว{arabic}", f"ว_{arabic}", f"ว {arabic}", f"ว {thai}", f"ว{thai}"]
++
+ _SOURCE_WEIGHTS = {
+     "vector": 1.0,
+     "bm25": BM25_WEIGHT,
+@@ -90,6 +116,7 @@ def rerank(
+     query: original query string, used for glossary-based injection from dedup pool.
+     """
+     all_items: list[dict] = []
++    id_markers = _id_query_markers(query) if query else []
+ 
+     for source, items in results.items():
+         if not items:
+@@ -121,6 +148,12 @@ def rerank(
+                     if src_substr in src_name and all(kw in query for kw in kws):
+                         item["weighted_score"] *= factor
+                         break
++            # ID-query boost (Approach B): strongly lift the exact circular named
++            # in the query ("ว 397") so it ranks #1 despite vector-pool dilution.
++            if id_markers:
++                hay = f"{item.get('source_name', '')} {item.get('ref_number', '')}"
++                if any(mk in hay for mk in id_markers):
++                    item["weighted_score"] *= ID_MATCH_BOOST
+             all_items.append(item)
+ 
+     # Exact-text dedup — keep best score per unique text

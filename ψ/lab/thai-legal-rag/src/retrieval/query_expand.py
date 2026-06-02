@@ -38,6 +38,8 @@ _SPECIFIC_PATTERNS = [
     r"กฎกระทรวง.*(ฉบับที่|พ\.ศ\.)",          # กฎกระทรวงฉบับที่ 2 / พ.ศ. 2560
     r"หมวด\s*[\d๐-๙]+",           # หมวด 3
     r"\b\d{4,}\b",                 # bare 4+ digit number = doc ID lookup (e.g. 5529, 51349)
+    r"(?:^|\s)ว\s*[\d๐-๙]{1,4}\b", # ว 397, ว๓๙๗ — หนังสือเวียน circular ID (anchored at word
+                                   # boundary so words ending in ว like ทบทวน/ข้าว don't false-match)
 ]
 
 
