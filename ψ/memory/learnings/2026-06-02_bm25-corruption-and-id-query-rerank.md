@@ -100,6 +100,47 @@ context, B loses it.
 workers=4 (use workers=1). Retrieval-only measurement works through the flakiness; full
 generate-eval does not reliably. Deferred the 84-TC baseline to when Vertex is stable.
 
+## Finding 4 — clean-BM25 baseline eval: 71/75 (9 API-SKIP), 2 consistent retrieval fails
+
+Ran full 84-TC eval on clean-BM25 local + committed bundle (A + refinement), workers=1,
+**unbuffered** (`python3 -u` — critical: block-buffered stdout hid all TC results, only
+stderr retry/warning lines showed → looked stalled at 0 TC; killed several working runs
+before realising. Per [[2026-04-11_eval-background-pipe-buffering]]). Result: **71 PASS /
+4 FAIL / 9 SKIP** ("71/75 passed, 9 skipped").
+
+- **9 SKIP** = per-TC 120s timeout hit during Vertex generate flakiness (429 + a DNS blip on
+  oauth2.googleapis.com). Environment noise, not regressions — re-run individually with --id.
+  (TC-001/003/006/007/011/013/014/027/079)
+- **4 FAIL**: TC-067, TC-074 = known LLM-variance intermittents (memory-confirmed).
+  TC-044, TC-077 = **consistent** (FAIL on re-run too) → real retrieval issues.
+- **None of the 4 fails is an ID query** → NOT caused by Approach A / refinement (0/84 trigger).
+  They are clean-BM25 + corpus-growth (31,368→34,212) ranking effects, or pre-existing.
+
+TC-044 drill-down: expected doc 52101 (`03_กวจ_52101_...ขยายเวลา`, 22 chunks) IS in corpus but
+NOT in reranked top-27 — outranked by คำวินิจฉัย 53/76/100 + 1758. Retrieval-ranking gap →
+needs cross-ref injection (existing pattern). TC-077 (มาตรา 102(1)-(3), must_contain
+อุทกภัย/น้ำท่วม) also consistent — drill-down pending.
+
+**Prod comparison (after switching back to home network for SSH; prod runs eval with its own
+stable Vertex):**
+- **TC-044**: FAIL on prod too → **pre-existing**, NOT a clean-BM25 regression. Deploy-safe
+  (no worse). Doc 52101 exists but isn't ranked into top-27 on either index. Optional improve.
+- **TC-077**: PASS ×3 on prod, FAIL ×2 on local clean-BM25 → **regression introduced by clean
+  BM25**. Root cause: the อุทกภัย/น้ำท่วม content (ว122.pdf, 16 chunks with มาตรา102+examples)
+  EXISTS in Qdrant — not stale — but prod's corrupted BM25 had ว122 duplicated 2-5×, which
+  artificially boosted it into the result set (PASS). Cleaning BM25 removed that duplicate-boost
+  artifact → ว122 drops → FAIL. **prod's PASS was an artifact of the BM25 corruption.** Fix with
+  a legitimate ranking boost/cross-ref for the มาตรา102+เหตุสุดวิสัย content (same class as TC-044).
+
+**Deploy gate status**: bundle (A+refinement) regression-free. Clean BM25 is correct but
+removing the duplicate-boost artifact regresses TC-077 (content exists, needs a ranking fix).
+TC-044 pre-existing. Before deploy: add ranking fix for TC-077 (and optionally TC-044), re-run
+the 9 API-SKIPs, then deploy bundle + prod BM25 rebuild.
+
+**Network is either/or** (this session): hotspot = Vertex generate works but SSH port 22 to prod
+blocked (ISP); home = SSH works but Vertex generate resets. Run local eval on hotspot, prod
+eval/SSH on home.
+
 ## Deploy bundle (when ready, per Ming)
 clean-BM25 rebuild on prod (NOT append — fixes Finding 1) + Approach A (or B) + the stashed
 vocab refinement, all together; then re-run 84-TC eval and prod smoke "ว 397" → rank 1.

@@ -38,6 +38,15 @@ _CANONICAL_BOOSTS: list[tuple[list[str], str, float]] = [
     # Needed because newer secondary sources (51385/2025, 1758) outscore it via recency boost.
     # Format: (query_keywords_all_must_match, source_name_substring, boost_factor)
     (["ตรวจรับ", "งวดสุดท้าย"], "22315", 1.06),
+    # ว ๑๒๒/๒๕๖๔ (กค (กวจ) ๐๔๐๕.๔/ว ๑๒๒, 2021-03-09) is the authoritative circular
+    # listing concrete examples (อุทกภัย/น้ำท่วม/ความไม่สงบ/โควิด) of the grounds under
+    # พ.ร.บ. มาตรา 102(1)-(3) — งด/ลดค่าปรับและขยายเวลา. The statute text gives only the
+    # general categories, and the statute carve-out restricts vector search to the law
+    # file_ids — leaving this circular with a weak BM25-only score (~0.43, rank 48).
+    # NB: marker is the ref_number, NOT "ว122" — a DIFFERENT ว ๑๒๒/๒๕๖๑ (๐๔๐๕.๒, R&D
+    # procurement) shares the filename stem and must not be matched. Keyed on both
+    # "มาตรา 102" and "เหตุ" → fires for TC-077 but NOT TC-071 (authority question).
+    (["มาตรา 102", "เหตุ"], "๐๔๐๕.๔/ว ๑๒๒", 2.5),
 ]
 
 
@@ -116,9 +125,12 @@ def rerank(
             # Canonical source boost: ensure the authoritative source for a
             # principle ranks above secondary sources that naturally discuss it.
             if query and _CANONICAL_BOOSTS:
-                src_name = item.get("source_name", "")
-                for kws, src_substr, factor in _CANONICAL_BOOSTS:
-                    if src_substr in src_name and all(kw in query for kw in kws):
+                # Match marker against source_name OR ref_number — some circulars
+                # share a filename stem (e.g. two different ว ๑๒๒) and can only be
+                # disambiguated by their ref_number (0405.4 vs 0405.2).
+                hay = f"{item.get('source_name', '')} {item.get('ref_number', '')}"
+                for kws, marker, factor in _CANONICAL_BOOSTS:
+                    if marker in hay and all(kw in query for kw in kws):
                         item["weighted_score"] *= factor
                         break
             all_items.append(item)
